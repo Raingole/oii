@@ -1,0 +1,10 @@
+models/
+data/.config.yaml
+__pycache__/
+*.py[cod]
+*.log
+.env
+.venv/
+venv/
+env/
+.DS_Store
