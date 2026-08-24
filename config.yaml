@@ -235,11 +235,11 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: ChatGLMLLM
+  LLM: AliLLM
   # 视觉语言大模型
   VLLM: ChatGLMVLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
-  TTS: EdgeTTS
+  TTS: AliBLTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: nomem
   # 意图识别模块开启后，可以播放音乐、控制音量、识别退出指令。
@@ -618,7 +618,7 @@ LLM:
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen-flash
-    api_key: 你的deepseek web key
+    api_key: "sk-1e6e3bf23d704e7685b90dae3c86be0c"
     temperature: 0.7  # 温度值
     max_tokens: 500   # 最大生成token数
     top_p: 1
@@ -1138,9 +1138,9 @@ TTS:
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     # cosyvoice-v3和部分音色需要申请开通
     type: alibl_stream
-    api_key: 你的api_key
-    model: "cosyvoice-v2"
-    voice: "longcheng_v2"
+    api_key: "sk-1e6e3bf23d704e7685b90dae3c86be0c"
+    model: "cosyvoice-v3.5-plus"
+    voice: "cosyvoice-v3.5-plus-liuying-6f0e8b16eeb548d1bd0388fa8ef5f1ba"
     output_dir: tmp/
     # 以下可不用设置，使用默认设置
     # format: pcm  # 音频格式：pcm、wav、mp3、opus
