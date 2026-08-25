@@ -19,6 +19,7 @@ PORT = int(os.getenv("MCP_PORT", "8766"))
 MCP_TOKEN = os.getenv("MCP_TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 AMAP_URL = "https://restapi.amap.com/v3/place/around"
+AMAP_TEXT_URL = "https://restapi.amap.com/v3/place/text"
 
 
 def load_restaurant_config() -> dict:
@@ -42,13 +43,17 @@ FIXED_LOCATION = RESTAURANT_CONFIG.get("location") or {
 
 TOOL = {
     "name": "find_nearby_restaurants",
-    "description": "以重庆理工大学两江校区学生公寓为中心查询附近餐馆，不使用公网IP定位。",
+    "description": "查询附近餐馆，不使用公网IP定位。用户提到具体地点时必须填nearby_place，餐馆类型才填keyword；否则使用固定学生公寓位置。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "keyword": {
                 "type": "string",
-                "description": "餐馆类型或关键词，例如火锅、粤菜、咖啡店。默认是餐馆。",
+                "description": "可选的餐馆类型，例如火锅、粤菜、咖啡店。不填则搜索所有餐饮服务。",
+            },
+            "nearby_place": {
+                "type": "string",
+                "description": "可选的目标地点，例如易美购。填写后以该地点为中心，否则以重庆理工大学两江校区学生公寓为中心。",
             },
             "radius": {
                 "type": "integer",
@@ -81,6 +86,10 @@ MEAL_TOOL = {
             "keyword": {
                 "type": "string",
                 "description": "可选的菜系或餐馆类型，例如火锅、粤菜、面馆。",
+            },
+            "nearby_place": {
+                "type": "string",
+                "description": "可选的目标地点，例如易美购。填写后以该地点为中心。",
             },
             "radius": {
                 "type": "integer",
@@ -144,6 +153,40 @@ async def locate_ip(client: httpx.AsyncClient, ip: str = "") -> dict:
     }
 
 
+async def locate_place(client: httpx.AsyncClient, place_name: str) -> dict:
+    data = await fetch_json(
+        client,
+        AMAP_TEXT_URL,
+        params={
+            "key": AMAP_KEY,
+            "keywords": place_name,
+            "city": "重庆",
+            "citylimit": "true",
+            "offset": 1,
+            "page": 1,
+            "extensions": "all",
+            "output": "json",
+        },
+    )
+    if data.get("status") != "1" or not data.get("pois"):
+        raise RuntimeError(f"高德地图未找到目标地点: {place_name}")
+    poi = data["pois"][0]
+    coordinates = str(poi.get("location", "")).split(",")
+    if len(coordinates) != 2:
+        raise RuntimeError(f"目标地点没有有效坐标: {place_name}")
+    return {
+        "ip": "",
+        "latitude": float(coordinates[1]),
+        "longitude": float(coordinates[0]),
+        "city": poi.get("cityname", "重庆"),
+        "region": poi.get("adname", ""),
+        "country": "中国",
+        "source": "amap_place",
+        "name": poi.get("name", place_name),
+        "address": poi.get("address", ""),
+    }
+
+
 def get_configured_location() -> dict | None:
     try:
         latitude = float(FIXED_LOCATION.get("latitude"))
@@ -170,13 +213,18 @@ async def find_restaurants(arguments: dict) -> str:
         raise RuntimeError("MCP服务未配置 AMAP_KEY")
 
     requested_keyword = str(arguments.get("keyword") or "").strip()[:50]
-    keyword = requested_keyword or "餐馆"
+    nearby_place = str(arguments.get("nearby_place") or "").strip()[:50]
+    keyword = requested_keyword or "餐饮服务"
     radius = 1000
     limit = max(1, min(int(arguments.get("limit", 10)), 20))
 
     timeout = httpx.Timeout(15.0)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        location = await resolve_location(client, arguments)
+        location = (
+            await locate_place(client, nearby_place)
+            if nearby_place
+            else await resolve_location(client, arguments)
+        )
         params = {
             "key": AMAP_KEY,
             "location": f"{location['longitude']},{location['latitude']}",
@@ -209,7 +257,7 @@ async def find_restaurants(arguments: dict) -> str:
 
     result = {
         "location": location,
-        "location_name": "重庆理工大学两江校区学生公寓",
+        "location_name": location.get("name") or "重庆理工大学两江校区学生公寓",
         "keyword": keyword,
         "radius_m": radius,
         "count": len(restaurants),
@@ -217,7 +265,7 @@ async def find_restaurants(arguments: dict) -> str:
         "notice": "查询中心为固定坐标，结果仅供参考。",
     }
     lines = [
-        f"高德地图查询中心：重庆理工大学两江校区学生公寓（经度{location['longitude']}，纬度{location['latitude']}）",
+        f"高德地图查询中心：{result['location_name']}（经度{location['longitude']}，纬度{location['latitude']}）",
         f"1公里内找到{len(restaurants)}家，以下店名、地址、距离和评分均来自高德地图，不得改写或编造：",
     ]
     for index, restaurant in enumerate(restaurants, 1):
@@ -238,7 +286,8 @@ async def recommend_meal(arguments: dict) -> str:
         raise RuntimeError("meal_period 必须是 早餐、午餐 或 晚餐")
 
     search_arguments = {
-        "keyword": str(arguments.get("keyword") or "餐馆").strip()[:50],
+        "keyword": str(arguments.get("keyword") or "").strip()[:50],
+        "nearby_place": str(arguments.get("nearby_place") or "").strip()[:50],
         "radius": arguments.get("radius", 3000),
         "limit": 20,
         "ip": arguments.get("ip", ""),
