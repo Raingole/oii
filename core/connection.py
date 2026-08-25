@@ -1796,6 +1796,41 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"销毁通知上下文失败: {e}")
 
+    async def drain_pending_notifications(self):
+        """回复播放结束后的兜底：补播没赶上本轮回复末尾的通知。
+
+        与 speak_txt 的区别：不写入对话上下文（通知只是播报，不进历史）。
+        """
+        if (
+            not self.pending_notify_texts
+            or self.client_abort
+            or self.client_is_speaking
+        ):
+            return
+        notes = []
+        while self.pending_notify_texts:
+            notes.append(self.pending_notify_texts.popleft())
+        text = "；".join(notes)
+        self.logger.bind(tag=TAG).info(f"回复结束后补播新消息提醒: {text}")
+        self.close_after_chat = False
+        self.sentence_id = str(uuid.uuid4().hex)
+        self.tts.store_tts_text(self.sentence_id, text)
+        self.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=self.sentence_id,
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        self.tts.tts_one_sentence(self, ContentType.TEXT, content_detail=text)
+        self.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=self.sentence_id,
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
     def _mark_tts_ready(self, future):
         """Release notification delivery only after TTS worker threads exist."""
         try:

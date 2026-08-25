@@ -307,6 +307,8 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
         if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
             conn.audio_rate_controller.stop_sending()
         conn.clearSpeakStatus()
+        # 兜底：本轮回复播完，把没赶上回复末尾的缓冲通知立即补播
+        await conn.drain_pending_notifications()
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
