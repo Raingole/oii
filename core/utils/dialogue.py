@@ -61,6 +61,12 @@ class Dialogue:
         else:
             self.put(Message(role="system", content=new_content))
 
+    def clear_context(self):
+        """销毁对话上下文：清空实际对话历史，保留 system 提示词与 few-shot。"""
+        self.dialogue = [
+            m for m in self.dialogue if m.role == "system" or m.is_temporary
+        ]
+
     def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
         """
         确保所有 tool_calls 都有对应的 tool 响应

@@ -1736,7 +1736,7 @@ class ConnectionHandler:
             )
 
     async def notify_text(self, text):
-        """向在线设备直接发送一段 TTS 文本。"""
+        """通知独立语音会话：打断当前播放、销毁上下文、播报、播完再销毁。"""
         if not self.websocket or self.stop_event.is_set():
             raise RuntimeError("设备连接不可用")
         if self.tts is None:
@@ -1752,10 +1752,32 @@ class ConnectionHandler:
             await handleAbortMessage(self)
         self.close_after_chat = False
         self.client_abort = False
+        # 通知是全新会话：播报前销毁旧对话上下文
+        self.dialogue.clear_context()
         self.sentence_id = str(uuid.uuid4().hex)
+        notify_sentence_id = self.sentence_id
         from core.handle.intentHandler import speak_txt
 
         speak_txt(self, text)
+        asyncio.create_task(
+            self._destroy_context_after_playback(notify_sentence_id)
+        )
+
+    async def _destroy_context_after_playback(self, notify_sentence_id):
+        """通知播报完成后销毁整个对话上下文；期间用户新开对话则跳过。"""
+        try:
+            deadline = time.time() + 120
+            while self.client_is_speaking and time.time() < deadline:
+                await asyncio.sleep(0.5)
+            if self.sentence_id != notify_sentence_id:
+                self.logger.bind(tag=TAG).info(
+                    "通知播报后检测到新对话，保留上下文"
+                )
+                return
+            self.dialogue.clear_context()
+            self.logger.bind(tag=TAG).info("通知播报完成，已销毁对话上下文")
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"销毁通知上下文失败: {e}")
 
     def _mark_tts_ready(self, future):
         """Release notification delivery only after TTS worker threads exist."""
