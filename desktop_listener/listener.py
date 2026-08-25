@@ -30,7 +30,7 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-async def listen(args) -> None:
+async def listen(args, stop_event=None) -> None:
     listener = UserNotificationListener.current
     access = await listener.request_access_async()
     if access != UserNotificationListenerAccessStatus.ALLOWED:
@@ -39,7 +39,7 @@ async def listen(args) -> None:
     session = requests.Session()
     known_ids = set()
     print("[INFO] 正在监听微信和QQ系统通知")
-    while True:
+    while stop_event is None or not stop_event.is_set():
         notifications = await listener.get_notifications_async(NotificationKinds.TOAST)
         for notification in notifications:
             notification_id = notification.id
