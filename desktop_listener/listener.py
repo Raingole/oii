@@ -6,8 +6,8 @@ import re
 import time
 
 import requests
+from winrt.windows.ui.notifications import NotificationKinds
 from winrt.windows.ui.notifications.management import (
-    NotificationKinds,
     UserNotificationListener,
     UserNotificationListenerAccessStatus,
 )
