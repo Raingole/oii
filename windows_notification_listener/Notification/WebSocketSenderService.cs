@@ -62,6 +62,13 @@ public sealed class WebSocketSenderService
             {
                 await RunSessionAsync(token);
             }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                IsRegistered = false;
+                _log?.Invoke($"[WS][WARN] Connect timed out; retry in {RetryDelay.TotalSeconds:s}s");
+                try { await Task.Delay(RetryDelay, token); }
+                catch (OperationCanceledException) { break; }
+            }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
@@ -76,7 +83,10 @@ public sealed class WebSocketSenderService
     private async Task RunSessionAsync(CancellationToken token)
     {
         using var socket = new ClientWebSocket();
-        await socket.ConnectAsync(_serverUri, token);
+        _log?.Invoke($"[WS][INFO] Connecting {_serverUri}");
+        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        connectCts.CancelAfter(TimeSpan.FromSeconds(10));
+        await socket.ConnectAsync(_serverUri, connectCts.Token);
         _log?.Invoke($"[WS][INFO] Connected {_serverUri}");
 
         await SendJsonAsync(socket, new
