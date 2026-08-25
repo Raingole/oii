@@ -1,5 +1,3 @@
-using System.Xml.Linq;
-using Windows.Foundation;
 using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
 using WindowsNotificationListener.Models;
@@ -8,9 +6,17 @@ namespace WindowsNotificationListener.Notification;
 
 public sealed class NotificationListenerService
 {
+    // NotificationChanged event subscription is not supported for full-trust
+    // desktop apps (RPC fails), so notifications are polled instead, matching
+    // the proven Python listener behavior.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
     private readonly UserNotificationListener _listener = UserNotificationListener.Current;
     private readonly NotificationFilter _filter;
     private readonly DeduplicationService _deduplication;
+    private readonly object _stateLock = new();
+    private CancellationTokenSource? _cts;
+    private Task? _pollTask;
 
     public event EventHandler<NotificationRecord>? NotificationReceived;
     public UserNotificationListenerAccessStatus AccessStatus { get; private set; } = UserNotificationListenerAccessStatus.Unspecified;
@@ -27,21 +33,42 @@ public sealed class NotificationListenerService
         return AccessStatus;
     }
 
-    public async Task StartAsync()
+    public void Start()
     {
         if (AccessStatus != UserNotificationListenerAccessStatus.Allowed)
             throw new InvalidOperationException("Windows notification listener permission is not Allowed.");
-        _listener.NotificationChanged -= OnNotificationChanged;
-        _listener.NotificationChanged += OnNotificationChanged;
-        await ReadCurrentNotificationsAsync();
+        Stop();
+        var cts = new CancellationTokenSource();
+        _cts = cts;
+        _pollTask = Task.Run(() => PollAsync(cts.Token));
     }
 
-    public void Stop() => _listener.NotificationChanged -= OnNotificationChanged;
-
-    private async void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)
+    public void Stop()
     {
-        try { await ReadCurrentNotificationsAsync(); }
-        catch { /* The next notification will retry the read. */ }
+        lock (_stateLock)
+        {
+            _cts?.Cancel();
+            try { _pollTask?.Wait(TimeSpan.FromSeconds(2)); }
+            catch { /* Polling already ended or is ending. */ }
+            _cts?.Dispose();
+            _cts = null;
+            _pollTask = null;
+        }
+    }
+
+    private async Task PollAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(PollInterval);
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(token)) break;
+                await ReadCurrentNotificationsAsync();
+            }
+            catch (OperationCanceledException) { break; }
+            catch { /* Keep polling; the next tick retries the read. */ }
+        }
     }
 
     private async Task ReadCurrentNotificationsAsync()

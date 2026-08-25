@@ -31,9 +31,9 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowError(ex); }
     }
 
-    private async void StartButton_Click(object sender, RoutedEventArgs e)
+    private void StartButton_Click(object sender, RoutedEventArgs e)
     {
-        try { await _service.StartAsync(); StatusText.Text = "状态：监听中"; }
+        try { _service.Start(); StatusText.Text = "状态：监听中（轮询模式）"; }
         catch (Exception ex) { ShowError(ex); }
     }
 
