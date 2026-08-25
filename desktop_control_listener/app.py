@@ -75,8 +75,14 @@ def open_application(name: str) -> None:
     candidates.sort(reverse=True)
     if not candidates:
         raise ValueError(f"未找到与“{name}”匹配的应用或桌面项目")
+    exact = [item for item in candidates if item[0] == 1.0]
+    if exact:
+        # An exact name always wins over fuzzy names such as Steam/Stream.
+        # Duplicate shortcuts for the same name are harmless; use the first.
+        os.startfile(exact[0][2])
+        return
     best = candidates[0]
-    if len(candidates) > 1 and best[0] < 1.0 and best[0] - candidates[1][0] < 0.12:
+    if len(candidates) > 1 and best[0] - candidates[1][0] < 0.12:
         options = "、".join(item[1] for item in candidates[:5])
         raise ValueError(f"找到多个匹配项：{options}")
     os.startfile(best[2])
