@@ -34,8 +34,8 @@ def load_restaurant_config() -> dict:
 RESTAURANT_CONFIG = load_restaurant_config()
 AMAP_KEY = RESTAURANT_CONFIG.get("amap_key", "")
 FIXED_LOCATION = RESTAURANT_CONFIG.get("location") or {
-    "latitude": 29.712219,
-    "longitude": 106.787707,
+    "latitude": 29.72,
+    "longitude": 106.79,
     "city": "重庆",
     "region": "两江新区普福大道学生公寓",
 }
@@ -52,7 +52,7 @@ TOOL = {
             },
             "radius": {
                 "type": "integer",
-                "description": "搜索半径，单位米，范围100到50000，默认3000。",
+                "description": "固定搜索半径1000米，不接受其他范围。",
             },
             "limit": {
                 "type": "integer",
@@ -92,7 +92,7 @@ MEAL_TOOL = {
             },
             "radius": {
                 "type": "integer",
-                "description": "搜索半径，单位米，默认3000。",
+                "description": "固定搜索半径1000米，不接受其他范围。",
             },
             "ip": {
                 "type": "string",
@@ -192,7 +192,7 @@ async def find_restaurants(arguments: dict) -> str:
 
     requested_keyword = str(arguments.get("keyword") or "").strip()[:50]
     keyword = requested_keyword or "餐馆"
-    radius = max(100, min(int(arguments.get("radius", 3000)), 50000))
+    radius = 1000
     limit = max(1, min(int(arguments.get("limit", 10)), 20))
 
     timeout = httpx.Timeout(15.0)
