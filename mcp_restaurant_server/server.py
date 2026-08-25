@@ -20,6 +20,8 @@ MCP_TOKEN = os.getenv("MCP_TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 AMAP_URL = "https://restapi.amap.com/v3/place/around"
 AMAP_TEXT_URL = "https://restapi.amap.com/v3/place/text"
+AMAP_DRIVING_URL = "https://restapi.amap.com/v3/direction/driving"
+AMAP_WALKING_URL = "https://restapi.amap.com/v3/direction/walking"
 
 
 def load_restaurant_config() -> dict:
@@ -104,6 +106,26 @@ MEAL_TOOL = {
     },
 }
 
+ROUTE_TOOL = {
+    "name": "estimate_route",
+    "description": "查询从重庆理工大学两江校区学生公寓到指定地点的地图距离和预计时间。用户询问去哪里要多远、到哪里要多久时使用，不要自行估算。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "destination": {
+                "type": "string",
+                "description": "目的地名称，例如易美购、重庆北站、解放碑。",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["driving", "walking"],
+                "description": "出行方式，驾车或步行，默认驾车。",
+            },
+        },
+        "required": ["destination"],
+    },
+}
+
 
 async def fetch_json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> dict:
     try:
@@ -185,6 +207,56 @@ async def locate_place(client: httpx.AsyncClient, place_name: str) -> dict:
         "name": poi.get("name", place_name),
         "address": poi.get("address", ""),
     }
+
+
+async def estimate_route(arguments: dict) -> str:
+    if not AMAP_KEY:
+        raise RuntimeError("MCP服务未配置 AMAP_KEY")
+    destination_name = str(arguments.get("destination") or "").strip()[:50]
+    if not destination_name:
+        raise RuntimeError("请提供目的地")
+    mode = str(arguments.get("mode") or "driving")
+    if mode not in {"driving", "walking"}:
+        mode = "driving"
+
+    origin = get_configured_location()
+    if not origin:
+        raise RuntimeError("MCP服务未配置固定起点坐标")
+    timeout = httpx.Timeout(15.0)
+    async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+        destination = await locate_place(client, destination_name)
+        data = await fetch_json(
+            client,
+            AMAP_DRIVING_URL if mode == "driving" else AMAP_WALKING_URL,
+            params={
+                "key": AMAP_KEY,
+                "origin": f"{origin['longitude']},{origin['latitude']}",
+                "destination": f"{destination['longitude']},{destination['latitude']}",
+                "extensions": "all",
+                "output": "json",
+            },
+        )
+    if data.get("status") != "1" or not data.get("route", {}).get("paths"):
+        raise RuntimeError(f"高德地图路线查询失败：{data.get('info', '未找到路线')}")
+
+    path = data["route"]["paths"][0]
+    distance = int(float(path.get("distance", 0)))
+    duration = int(float(path.get("duration", 0)))
+    minutes = max(1, round(duration / 60))
+    method = "驾车" if mode == "driving" else "步行"
+    return json.dumps({
+        "action": "RESPONSE",
+        "response": (
+            f"从重庆理工大学两江校区学生公寓到{destination.get('name', destination_name)}，"
+            f"{method}距离约{distance}米，预计{minutes}分钟。"
+            f"目的地地址：{destination.get('address') or '地址暂无'}。以上信息均来自高德地图。"
+        ),
+        "origin": origin,
+        "destination": destination,
+        "mode": mode,
+        "distance_m": distance,
+        "duration_s": duration,
+    }, ensure_ascii=False)
 
 
 def get_configured_location() -> dict | None:
@@ -367,19 +439,21 @@ async def handle(websocket):
             elif method == "tools/list":
                 await websocket.send(
                     json.dumps(
-                        {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [TOOL, MEAL_TOOL]}},
+                        {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [TOOL, MEAL_TOOL, ROUTE_TOOL]}},
                         ensure_ascii=False,
                     )
                 )
             elif method == "tools/call":
                 name = request.get("params", {}).get("name")
-                if name not in {TOOL["name"], MEAL_TOOL["name"]}:
+                if name not in {TOOL["name"], MEAL_TOOL["name"], ROUTE_TOOL["name"]}:
                     await send_error(websocket, request_id, -32601, f"未知工具: {name}")
                     continue
                 try:
                     arguments = request.get("params", {}).get("arguments", {})
                     if name == MEAL_TOOL["name"]:
                         text = await recommend_meal(arguments)
+                    elif name == ROUTE_TOOL["name"]:
+                        text = await estimate_route(arguments)
                     else:
                         text = await find_restaurants(arguments)
                     result = {"content": [{"type": "text", "text": text}]}

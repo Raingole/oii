@@ -1,6 +1,6 @@
 # IP 餐馆 MCP 服务
 
-这个服务为小智提供两个 MCP 工具：`find_nearby_restaurants` 和 `recommend_meal`。它会检测服务所在机器的公网 IP，通过 IP 定位获取大致位置，再调用高德地图查询周边餐馆；`recommend_meal` 会从搜索结果中随机推荐一家。高德 Key 从 `data/.config.yaml` 读取。
+这个服务为小智提供三个 MCP 工具：`find_nearby_restaurants`、`recommend_meal` 和 `estimate_route`。前两个用于查询和随机推荐餐馆，后者用于查询从固定位置到目标地点的距离和预计时间。高德 Key 从 `data/.config.yaml` 读取。
 
 ## 需要提供
 

@@ -53,6 +53,22 @@ def detect_meal_request(text: str):
     return period, keyword, nearby_place
 
 
+def detect_route_request(text: str):
+    """识别目的地距离或耗时查询。"""
+    match = re.search(
+        r"(?:去|到)([\u4e00-\u9fffA-Za-z0-9·]{1,20}?)(?:大概要|大概|要|需要)?"
+        r"(?:多远|多久|几分钟|多少时间)",
+        text,
+    )
+    if not match:
+        return None
+    destination = match.group(1).strip()
+    if not destination:
+        return None
+    mode = "walking" if re.search(r"步行|走路|走过去", text) else "driving"
+    return destination, mode
+
+
 async def handle_user_intent(conn: "ConnectionHandler", text):
     # 预处理输入文本，处理可能的JSON格式
     try:
@@ -74,6 +90,9 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
         return True
 
     if conn.intent_type == "function_call":
+        route_request = detect_route_request(text)
+        if route_request and getattr(conn, "func_handler", None):
+            return await estimate_route_directly(conn, text, *route_request)
         meal_request = detect_meal_request(text)
         if meal_request and getattr(conn, "func_handler", None):
             return await recommend_meal_directly(conn, text, *meal_request)
@@ -137,6 +156,38 @@ async def recommend_meal_directly(
         except Exception as exc:
             conn.logger.bind(tag=TAG).error(f"确定性餐馆推荐失败: {exc}")
             speak_txt(conn, "餐馆查询失败，请稍后再试。")
+
+    conn.executor.submit(process_function_call)
+    return True
+
+
+async def estimate_route_directly(
+    conn: "ConnectionHandler", text: str, destination: str, mode: str
+):
+    """路线查询直接使用地图结果，避免模型自行估算距离和时间。"""
+    function_call_data = {
+        "name": "estimate_route",
+        "id": str(uuid.uuid4().hex),
+        "arguments": json.dumps({"destination": destination, "mode": mode}, ensure_ascii=False),
+    }
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    enqueue_tool_report(conn, "estimate_route", {"destination": destination, "mode": mode})
+
+    def process_function_call():
+        conn.dialogue.put(Message(role="user", content=text))
+        try:
+            result = asyncio.run_coroutine_threadsafe(
+                conn.func_handler.handle_llm_function_call(conn, function_call_data),
+                conn.loop,
+            ).result(timeout=int(conn.config.get("tool_call_timeout", 30)))
+            if result and result.action == Action.RESPONSE and result.response:
+                speak_txt(conn, result.response)
+            elif result and result.action in {Action.ERROR, Action.NOTFOUND}:
+                speak_txt(conn, result.response or result.result or "路线查询失败")
+        except Exception as exc:
+            conn.logger.bind(tag=TAG).error(f"确定性路线查询失败: {exc}")
+            speak_txt(conn, "路线查询失败，请稍后再试。")
 
     conn.executor.submit(process_function_call)
     return True
