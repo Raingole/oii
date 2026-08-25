@@ -23,7 +23,7 @@ class SimpleHttpServer:
         self.pending_notifications = deque(maxlen=100)
         self.notification_lock = asyncio.Lock()
         self.desktop_control = DesktopControl(config, self.logger)
-        self.notification_hub = WindowsNotificationHub(config, self.logger)
+        self.notification_hub = WindowsNotificationHub(config, self.logger, self.deliver_notification)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -107,6 +107,21 @@ class SimpleHttpServer:
             self.logger.bind(tag=TAG).error(f"错误堆栈: {traceback.format_exc()}")
             raise
 
+    async def deliver_notification(self, text: str) -> bool:
+        """Send text to the ESP board via server TTS; queue while offline."""
+        async with self.notification_lock:
+            connections = list(self.websocket_server.connections.values())
+            if not connections:
+                self.pending_notifications.append(text[:500])
+                return False
+            try:
+                await connections[0].notify_text(text[:500])
+            except Exception as exc:
+                self.pending_notifications.append(text[:500])
+                self.logger.bind(tag=TAG).error(f"下发通知失败，已排队: {exc}")
+                return False
+            return True
+
     async def handle_notify(self, request):
         """接受桌面监听器消息并转为设备 TTS。"""
         if not self.websocket_server:
@@ -119,17 +134,9 @@ class SimpleHttpServer:
         text = str(payload.get("text", "")).strip()
         if not text:
             return web.json_response({"ok": False, "error": "缺少text"}, status=400)
-        async with self.notification_lock:
-            connections = list(self.websocket_server.connections.values())
-            if not connections:
-                self.pending_notifications.append(text[:500])
-                return web.json_response({"ok": True, "queued": True}, status=202)
-            try:
-                await connections[0].notify_text(text[:500])
-            except Exception as exc:
-                self.pending_notifications.append(text[:500])
-                self.logger.bind(tag=TAG).error(f"下发通知失败，已排队: {exc}")
-                return web.json_response({"ok": False, "queued": True, "error": str(exc)}, status=503)
+        delivered = await self.deliver_notification(text)
+        if not delivered:
+            return web.json_response({"ok": True, "queued": True}, status=202)
         return web.json_response({"ok": True})
 
     async def deliver_pending_notifications(self, connection):

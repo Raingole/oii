@@ -10,12 +10,14 @@ from aiohttp import web, WSMsgType
 
 
 class WindowsNotificationHub:
-    def __init__(self, config: dict, logger):
+    def __init__(self, config: dict, logger, deliver=None):
         self.logger = logger
         server_config = config.get("server", {})
         configured = server_config.get("desktop_token", "")
         self.token = str(configured or server_config.get("auth_key", ""))
         self.clients: dict[str, web.WebSocketResponse] = {}
+        # deliver(text) sends spoken text to the ESP board via server TTS.
+        self.deliver = deliver
 
     def authenticate(self, request: web.Request) -> bool:
         supplied = request.query.get("token") or request.headers.get("X-Desktop-Token", "")
@@ -48,12 +50,23 @@ class WindowsNotificationHub:
                     )
                     await socket.send_json({"type": "registered", "device_id": device_id})
                 elif msg_type == "notification":
+                    app_name = str(payload.get("app_name") or "未知应用")
+                    title = str(payload.get("title", "")).strip()
+                    content = str(payload.get("content", "")).strip()
                     self.logger.bind(tag="windows_notify").info(
-                        f"Notification received App={payload.get('app_name', 'Unknown app')} "
-                        f"Title={payload.get('title', '')} "
-                        f"Content={payload.get('content', '')} "
+                        f"Notification received App={app_name} "
+                        f"Title={title} Content={content} "
                         f"Id={payload.get('notification_id', '')}"
                     )
+                    if self.deliver is None:
+                        continue
+                    text = f"收到新消息：{title}，{content}" if title else f"收到新消息：{content}"
+                    try:
+                        await self.deliver(text[:500])
+                    except Exception as exc:
+                        self.logger.bind(tag="windows_notify").error(
+                            f"下发 ESP 播报失败: {exc}"
+                        )
                 elif msg_type == "ping":
                     await socket.send_json({"type": "pong"})
         finally:
