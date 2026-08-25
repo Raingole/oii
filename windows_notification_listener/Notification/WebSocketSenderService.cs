@@ -83,6 +83,10 @@ public sealed class WebSocketSenderService
     private async Task RunSessionAsync(CancellationToken token)
     {
         using var socket = new ClientWebSocket();
+        // Bypass the system proxy (Clash etc.): an empty WebProxy returns no
+        // proxy for every URI, forcing a direct connection like the Python
+        // listeners do.
+        socket.Options.Proxy = new System.Net.WebProxy();
         _log?.Invoke($"[WS][INFO] Connecting {_serverUri}");
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         connectCts.CancelAfter(TimeSpan.FromSeconds(10));
