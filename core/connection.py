@@ -203,6 +203,9 @@ class ConnectionHandler:
         # 标记当前是否为来电接听模式
         self.incoming_call = None
 
+        # 对话进行中收到的通知，追加到本轮回复末尾一起播报
+        self.pending_notify_texts = deque(maxlen=10)
+
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
             # 获取运行中的事件循环（必须在异步上下文中）
@@ -1388,6 +1391,20 @@ class ConnectionHandler:
             self.tts.store_tts_text(current_sentence_id, text_buff)
             self.dialogue.put(Message(role="assistant", content=text_buff))
 
+        # 对话进行中收到的通知，追加到本轮回复末尾一起下发
+        if depth == 0 and self.pending_notify_texts:
+            while self.pending_notify_texts:
+                note = self.pending_notify_texts.popleft()
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=current_sentence_id,
+                        sentence_type=SentenceType.MIDDLE,
+                        content_type=ContentType.TEXT,
+                        content_detail=note,
+                    )
+                )
+                self.logger.bind(tag=TAG).info(f"回复末尾追加新消息提醒: {note}")
+
         if depth == 0:
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
@@ -1736,7 +1753,7 @@ class ConnectionHandler:
             )
 
     async def notify_text(self, text):
-        """通知独立语音会话：打断当前播放、销毁上下文、播报、播完再销毁。"""
+        """通知下发：空闲立即播报（独立会话），对话中缓冲到本轮回复末尾。"""
         if not self.websocket or self.stop_event.is_set():
             raise RuntimeError("设备连接不可用")
         if self.tts is None:
@@ -1747,9 +1764,9 @@ class ConnectionHandler:
         if not text or not text.strip():
             raise ValueError("通知内容不能为空")
         if self.client_is_speaking:
-            from core.handle.abortHandle import handleAbortMessage
-
-            await handleAbortMessage(self)
+            self.pending_notify_texts.append(text.strip()[:500])
+            self.logger.bind(tag=TAG).info("对话进行中，通知将追加到本轮回复末尾")
+            return
         self.close_after_chat = False
         self.client_abort = False
         # 通知是全新会话：播报前销毁旧对话上下文
