@@ -21,7 +21,7 @@ TAG = __name__
 
 def detect_meal_request(text: str):
     """识别餐饮请求，返回用餐时段、菜品关键词和目标地点。"""
-    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃|想吃|换一家|换个吃的", text):
+    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃|想吃|换一家|换个吃的|换一张饭|换个饭", text):
         return None
     if re.search(r"早上|早餐|早饭", text):
         period = "早餐"
