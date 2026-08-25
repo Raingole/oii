@@ -1,0 +1,59 @@
+using System.Text.Json;
+using Microsoft.UI.Xaml;
+using Windows.UI.Notifications.Management;
+using WindowsNotificationListener.Models;
+using WindowsNotificationListener.Notification;
+
+namespace WindowsNotificationListener;
+
+public sealed partial class MainWindow : Window
+{
+    private readonly NotificationListenerService _service;
+    private readonly string _logPath;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        var filter = new NotificationFilter { AllowApps = [] };
+        _service = new NotificationListenerService(filter, new DeduplicationService());
+        _service.NotificationReceived += OnNotificationReceived;
+        _logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaozhiNotificationListener", "listener.log");
+    }
+
+    private async void RequestButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var status = await _service.RequestAccessAsync();
+            StatusText.Text = $"状态：{status}";
+            StartButton.IsEnabled = status == UserNotificationListenerAccessStatus.Allowed;
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void StartButton_Click(object sender, RoutedEventArgs e)
+    {
+        try { await _service.StartAsync(); StatusText.Text = "状态：监听中"; }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private void StopButton_Click(object sender, RoutedEventArgs e)
+    {
+        _service.Stop();
+        StatusText.Text = "状态：已停止";
+    }
+
+    private void OnNotificationReceived(object? sender, NotificationRecord record)
+    {
+        var json = JsonSerializer.Serialize(record);
+        _ = DispatcherQueue.TryEnqueue(() => Output.Text += $"{json}{Environment.NewLine}");
+        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}][WINDOWS][INFO] Notification received {json}{Environment.NewLine}");
+    }
+
+    private void ShowError(Exception ex)
+    {
+        StatusText.Text = $"错误：{ex.Message}";
+        File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:O}][WINDOWS][ERROR] {ex}{Environment.NewLine}");
+    }
+}
