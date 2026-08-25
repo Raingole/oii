@@ -4,6 +4,7 @@ import uuid
 import random
 import asyncio
 from typing import TYPE_CHECKING
+from pypinyin import lazy_pinyin
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -37,6 +38,20 @@ wakeup_words_config = WakeupWordsConfig()
 
 # 用于防止并发调用wakeupWordsResponse的锁
 _wakeup_response_lock = asyncio.Lock()
+WAKEUP_CANONICAL_TEXT = "你好oii"
+
+
+def is_similar_wakeup_word(text: str) -> bool:
+    """匹配三字中文 ASR 结果中接近“偶以以”(ou-yi-yi)的读音。"""
+    if len(text) != 3 or not all("\u4e00" <= char <= "\u9fff" for char in text):
+        return False
+
+    syllables = lazy_pinyin(text)
+    first_matches = {"ou", "o"}
+    other_matches = {"yi", "i"}
+    return syllables[0] in first_matches and all(
+        syllable in other_matches for syllable in syllables[1:]
+    )
 
 
 async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
@@ -81,7 +96,8 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
         return False
 
     _, filtered_text = remove_punctuation_and_length(text)
-    if filtered_text not in conn.config.get("wakeup_words"):
+    is_configured_wakeup = filtered_text in conn.config.get("wakeup_words", [])
+    if not is_configured_wakeup and not is_similar_wakeup_word(filtered_text):
         return False
 
     conn.just_woken_up = True
@@ -110,7 +126,9 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     # 将唤醒词回复视为新会话，生成新的 sentence_id，确保流控器重置
     conn.sentence_id = str(uuid.uuid4().hex)
 
-    conn.logger.bind(tag=TAG).info(f"播放唤醒词回复: {response.get('text')}")
+    conn.logger.bind(tag=TAG).info(
+        f"识别到唤醒词，统一替换为: {WAKEUP_CANONICAL_TEXT}，播放唤醒词回复: {response.get('text')}"
+    )
     await sendAudioMessage(conn, SentenceType.FIRST, opus_packets, response.get("text"))
     await sendAudioMessage(conn, SentenceType.LAST, [], None)
 
