@@ -1,10 +1,10 @@
 # IP 餐馆 MCP 服务
 
-这个服务为小智提供两个 MCP 工具：`find_nearby_restaurants` 和 `recommend_meal`。它会检测服务所在机器的公网 IP，通过 IP 定位获取大致位置，再调用高德地图查询周边餐馆；`recommend_meal` 会从搜索结果中随机推荐一家。高德 Key 已配置在 `server.py` 中。
+这个服务为小智提供两个 MCP 工具：`find_nearby_restaurants` 和 `recommend_meal`。它会检测服务所在机器的公网 IP，通过 IP 定位获取大致位置，再调用高德地图查询周边餐馆；`recommend_meal` 会从搜索结果中随机推荐一家。高德 Key 从 `data/.config.yaml` 读取。
 
 ## 需要提供
 
-- 高德地图 Web 服务 API Key，申请地址：<https://console.amap.com/dev/key/app>
+- 高德地图 Web 服务 API Key，申请地址：<https://console.amap.com/dev/key/app>，填写到 `data/.config.yaml` 的 `mcp.restaurant.amap_key`
 - 如果要从另一台机器连接，需要让 MCP 服务端口可以被小智服务器访问
 - 可选的 MCP Token，用于保护 WebSocket 接口
 

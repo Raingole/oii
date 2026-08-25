@@ -10,14 +10,27 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import websockets
+import yaml
 
 
 HOST = os.getenv("MCP_HOST", "0.0.0.0")
 PORT = int(os.getenv("MCP_PORT", "8766"))
 MCP_TOKEN = os.getenv("MCP_TOKEN", "")
-AMAP_KEY = "REPLACE_WITH_AMAP_KEY"
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 AMAP_URL = "https://restapi.amap.com/v3/place/around"
+
+
+def load_amap_key() -> str:
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", ".config.yaml")
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            config = yaml.safe_load(config_file) or {}
+        return config.get("mcp", {}).get("restaurant", {}).get("amap_key", "")
+    except (OSError, yaml.YAMLError):
+        return ""
+
+
+AMAP_KEY = load_amap_key()
 
 TOOL = {
     "name": "find_nearby_restaurants",
