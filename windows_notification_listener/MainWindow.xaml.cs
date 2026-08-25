@@ -15,9 +15,16 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         var filter = new NotificationFilter { AllowApps = [] };
-        _service = new NotificationListenerService(filter, new DeduplicationService());
+        _service = new NotificationListenerService(filter, new DeduplicationService(), AppendDiagnostics);
         _service.NotificationReceived += OnNotificationReceived;
         _logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaozhiNotificationListener", "listener.log");
+    }
+
+    private void AppendDiagnostics(string message)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        File.AppendAllText(_logPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}{message}{Environment.NewLine}");
+        _ = DispatcherQueue.TryEnqueue(() => Output.Text += $"{message}{Environment.NewLine}");
     }
 
     private async void RequestButton_Click(object sender, RoutedEventArgs e)
