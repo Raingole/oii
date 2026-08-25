@@ -62,14 +62,6 @@ TOOL = {
                 "type": "string",
                 "description": "兼容旧参数，不使用。位置固定为重庆理工大学两江校区学生公寓。",
             },
-            "latitude": {
-                "type": "number",
-                "description": "可选的精确纬度；与longitude同时提供时优先使用。",
-            },
-            "longitude": {
-                "type": "number",
-                "description": "可选的精确经度；与latitude同时提供时优先使用。",
-            },
         },
         "required": [],
     },
@@ -97,14 +89,6 @@ MEAL_TOOL = {
             "ip": {
                 "type": "string",
                 "description": "兼容旧参数，不使用。位置固定为重庆理工大学两江校区学生公寓。",
-            },
-            "latitude": {
-                "type": "number",
-                "description": "可选的精确纬度；与longitude同时提供时优先使用。",
-            },
-            "longitude": {
-                "type": "number",
-                "description": "可选的精确经度；与latitude同时提供时优先使用。",
             },
         },
         "required": ["meal_period"],
@@ -178,12 +162,7 @@ def get_configured_location() -> dict | None:
 
 
 async def resolve_location(client: httpx.AsyncClient, arguments: dict) -> dict:
-    try:
-        latitude = float(arguments.get("latitude"))
-        longitude = float(arguments.get("longitude"))
-        return {"ip": "", "latitude": latitude, "longitude": longitude, "source": "tool"}
-    except (TypeError, ValueError):
-        return get_configured_location()
+    return get_configured_location()
 
 
 async def find_restaurants(arguments: dict) -> str:
@@ -230,6 +209,7 @@ async def find_restaurants(arguments: dict) -> str:
 
     result = {
         "location": location,
+        "location_name": "重庆理工大学两江校区学生公寓",
         "keyword": keyword,
         "radius_m": radius,
         "count": len(restaurants),
@@ -249,8 +229,6 @@ async def recommend_meal(arguments: dict) -> str:
         "radius": arguments.get("radius", 3000),
         "limit": 20,
         "ip": arguments.get("ip", ""),
-        "latitude": arguments.get("latitude"),
-        "longitude": arguments.get("longitude"),
     }
     search_result = json.loads(await find_restaurants(search_arguments))
     restaurants = search_result.get("restaurants", [])
