@@ -1,4 +1,5 @@
 import asyncio
+import json
 from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
@@ -8,8 +9,9 @@ TAG = __name__
 
 
 class SimpleHttpServer:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, websocket_server=None):
         self.config = config
+        self.websocket_server = websocket_server
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
@@ -72,6 +74,7 @@ class SimpleHttpServer:
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
+                        web.post("/api/notify", self.handle_notify),
                     ]
                 )
 
@@ -90,3 +93,30 @@ class SimpleHttpServer:
 
             self.logger.bind(tag=TAG).error(f"错误堆栈: {traceback.format_exc()}")
             raise
+
+    async def handle_notify(self, request):
+        """接受桌面监听器消息并转为设备 TTS。"""
+        expected_token = self.config.get("server", {}).get("notification_token", "")
+        provided_token = request.headers.get("X-Notify-Token", "")
+        if not expected_token or provided_token != expected_token:
+            return web.json_response({"ok": False, "error": "通知接口未授权"}, status=401)
+        if not self.websocket_server:
+            return web.json_response({"ok": False, "error": "WebSocket服务未初始化"}, status=503)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"ok": False, "error": "请求必须是JSON"}, status=400)
+
+        device_id = str(payload.get("device_id", "")).strip()
+        text = str(payload.get("text", "")).strip()
+        if not device_id or not text:
+            return web.json_response({"ok": False, "error": "缺少device_id或text"}, status=400)
+        conn = self.websocket_server.get_connection(device_id)
+        if not conn:
+            return web.json_response({"ok": False, "error": "设备当前不在线"}, status=404)
+        try:
+            await conn.notify_text(text[:500])
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"下发通知失败: {exc}")
+            return web.json_response({"ok": False, "error": str(exc)}, status=503)
+        return web.json_response({"ok": True})

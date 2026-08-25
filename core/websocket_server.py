@@ -44,6 +44,7 @@ class WebSocketServer:
         self.config = config
         self.logger = setup_logging(config)
         self.config_lock = asyncio.Lock()
+        self.connections = {}
         modules = initialize_modules(
             self.logger,
             self.config,
@@ -67,6 +68,18 @@ class WebSocketServer:
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+
+    def register_connection(self, conn):
+        if conn.device_id:
+            self.connections[conn.device_id] = conn
+            self.logger.bind(tag=TAG).info(f"设备已注册通知连接: {conn.device_id}")
+
+    def unregister_connection(self, conn):
+        if conn.device_id and self.connections.get(conn.device_id) is conn:
+            self.connections.pop(conn.device_id, None)
+
+    def get_connection(self, device_id):
+        return self.connections.get(device_id)
 
     async def start(self):
         server_config = self.config["server"]

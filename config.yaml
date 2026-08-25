@@ -25,6 +25,8 @@ server:
   # 所以如果你使用docker部署时，将vision_explain设置成局域网地址
   # 如果你使用公网部署时，将vision_explain设置成公网地址
   vision_explain: http://你的ip或者域名:端口号/mcp/vision/explain
+  # 桌面消息监听器调用 /api/notify 时使用的令牌
+  notification_token: "请设置一个随机长令牌"
   # OTA返回信息时区偏移量
   timezone_offset: +8
   # 认证配置

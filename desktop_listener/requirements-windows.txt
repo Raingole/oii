@@ -1,0 +1,4 @@
+winrt-runtime
+winrt-Windows.UI.Notifications
+winrt-Windows.UI.Notifications.Management
+requests>=2.32.0

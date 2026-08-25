@@ -219,6 +219,8 @@ class ConnectionHandler:
             )
 
             self.device_id = self.headers.get("device-id", None)
+            if self.server:
+                self.server.register_connection(self)
 
             # 认证通过,继续处理
             self.websocket = ws
@@ -263,6 +265,8 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}-{stack_trace}")
             return
         finally:
+            if self.server:
+                self.server.unregister_connection(self)
             try:
                 await self._save_and_close(ws)
             except Exception as final_error:
@@ -1685,6 +1689,21 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).debug(
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
+
+    async def notify_text(self, text):
+        """向在线设备直接发送一段 TTS 文本。"""
+        if not self.websocket or self.stop_event.is_set():
+            raise RuntimeError("设备连接不可用")
+        if self.client_is_speaking:
+            from core.handle.abortHandle import handleAbortMessage
+
+            await handleAbortMessage(self)
+        self.close_after_chat = False
+        self.client_abort = False
+        self.sentence_id = str(uuid.uuid4().hex)
+        from core.handle.intentHandler import speak_txt
+
+        speak_txt(self, text)
 
     def reset_audio_states(self):
         """
