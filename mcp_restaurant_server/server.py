@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import sys
 import asyncio
 from typing import Any
@@ -42,6 +43,34 @@ TOOL = {
             },
         },
         "required": [],
+    },
+}
+
+MEAL_TOOL = {
+    "name": "recommend_meal",
+    "description": "当用户询问今天早上、早餐、中午、午餐、晚上或晚餐吃什么时，结合当前位置附近餐馆随机推荐一家。不要在普通聊天中主动调用。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "meal_period": {
+                "type": "string",
+                "enum": ["早餐", "午餐", "晚餐"],
+                "description": "用餐时段：早餐、午餐或晚餐。",
+            },
+            "keyword": {
+                "type": "string",
+                "description": "可选的菜系或餐馆类型，例如火锅、粤菜、面馆。",
+            },
+            "radius": {
+                "type": "integer",
+                "description": "搜索半径，单位米，默认3000。",
+            },
+            "ip": {
+                "type": "string",
+                "description": "可选的公网IP，留空则自动检测当前服务出口IP。",
+            },
+        },
+        "required": ["meal_period"],
     },
 }
 
@@ -130,6 +159,35 @@ async def find_restaurants(arguments: dict) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+async def recommend_meal(arguments: dict) -> str:
+    period = str(arguments.get("meal_period") or "").strip()
+    if period not in {"早餐", "午餐", "晚餐"}:
+        raise RuntimeError("meal_period 必须是 早餐、午餐 或 晚餐")
+
+    search_arguments = {
+        "keyword": str(arguments.get("keyword") or "餐馆").strip()[:50],
+        "radius": arguments.get("radius", 3000),
+        "limit": 20,
+        "ip": arguments.get("ip", ""),
+    }
+    search_result = json.loads(await find_restaurants(search_arguments))
+    restaurants = search_result.get("restaurants", [])
+    if not restaurants:
+        return json.dumps({
+            "meal_period": period,
+            "message": "附近没有找到符合条件的餐馆，请扩大搜索范围或更换关键词。",
+            "location": search_result.get("location", {}),
+        }, ensure_ascii=False)
+
+    recommendation = random.SystemRandom().choice(restaurants)
+    return json.dumps({
+        "meal_period": period,
+        "recommendation": recommendation,
+        "location": search_result.get("location", {}),
+        "notice": "这是从附近搜索结果中随机推荐的一家，公网IP定位可能存在较大误差。",
+    }, ensure_ascii=False)
+
+
 async def send_error(websocket, request_id, code: int, message: str) -> None:
     await websocket.send(
         json.dumps(
@@ -177,17 +235,21 @@ async def handle(websocket):
             elif method == "tools/list":
                 await websocket.send(
                     json.dumps(
-                        {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [TOOL]}},
+                        {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [TOOL, MEAL_TOOL]}},
                         ensure_ascii=False,
                     )
                 )
             elif method == "tools/call":
                 name = request.get("params", {}).get("name")
-                if name != TOOL["name"]:
+                if name not in {TOOL["name"], MEAL_TOOL["name"]}:
                     await send_error(websocket, request_id, -32601, f"未知工具: {name}")
                     continue
                 try:
-                    text = await find_restaurants(request.get("params", {}).get("arguments", {}))
+                    arguments = request.get("params", {}).get("arguments", {})
+                    if name == MEAL_TOOL["name"]:
+                        text = await recommend_meal(arguments)
+                    else:
+                        text = await find_restaurants(arguments)
                     result = {"content": [{"type": "text", "text": text}]}
                     await websocket.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}, ensure_ascii=False))
                 except Exception as exc:
