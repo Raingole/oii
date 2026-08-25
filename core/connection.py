@@ -134,6 +134,9 @@ class ConnectionHandler:
         self.vad = None
         self.asr = None
         self.tts = None
+        # The WebSocket is accepted before the TTS provider finishes loading.
+        # Notification delivery waits for this event instead of dropping early messages.
+        self.tts_ready_event = asyncio.Event()
         self._asr = _asr
         self._vad = _vad
         self.llm = _llm
@@ -609,9 +612,10 @@ class ConnectionHandler:
             if self.tts is None:
                 self.tts = self._initialize_tts()
             # 打开语音合成通道
-            asyncio.run_coroutine_threadsafe(
+            tts_open = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
             )
+            tts_open.add_done_callback(self._mark_tts_ready)
             if self.need_bind:
                 self.bind_completed_event.set()
                 return
@@ -1076,6 +1080,12 @@ class ConnectionHandler:
             # 递归调用时，使用当前的sentence_id
             current_sentence_id = self.sentence_id
 
+        # Opening a local application is an action, not a conversational answer.
+        # Route explicit "打开..." requests directly so the LLM cannot claim it
+        # opened an app without issuing the desktop command.
+        if depth == 0 and self._try_direct_desktop_open(query, current_sentence_id):
+            return
+
         # 设置最大递归深度，避免无限循环，可根据实际需求调整
         MAX_DEPTH = 5
         force_final_answer = False  # 标记是否强制最终回答
@@ -1386,6 +1396,7 @@ class ConnectionHandler:
                     content_type=ContentType.ACTION,
                 )
             )
+
             # 使用lambda延迟计算，只有在DEBUG级别时才执行get_llm_dialogue()
             self.logger.bind(tag=TAG).debug(
                 lambda: json.dumps(
@@ -1393,6 +1404,40 @@ class ConnectionHandler:
                 )
             )
 
+        return True
+
+    def _try_direct_desktop_open(self, query, sentence_id) -> bool:
+        if self.intent_type != "function_call" or not self.func_handler:
+            return False
+        spoken = query.get("content", "") if isinstance(query, dict) else query
+        if not isinstance(spoken, str):
+            return False
+        match = re.match(r"^\s*打开(?:一下|这个|那个)?\s*(.+?)\s*[。！？!?]*$", spoken)
+        if not match:
+            return False
+        name = match.group(1).strip()
+        if not name or "浏览器" in name:
+            return False
+        tool_call = {
+            "id": str(uuid.uuid4().hex),
+            "name": "open_desktop_app",
+            "arguments": json.dumps({"target": "application", "name": name}, ensure_ascii=False),
+        }
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self.func_handler.handle_llm_function_call(self, tool_call), self.loop
+            )
+            result = future.result(timeout=int(self.config.get("tool_call_timeout", 30)))
+            self._handle_function_result([(result, tool_call)], depth=0)
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.LAST,
+                    content_type=ContentType.ACTION,
+                )
+            )
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"直接打开桌面应用失败: {exc}")
         return True
 
     def _handle_function_result(self, tool_results, depth, streamed_text=""):
@@ -1694,6 +1739,13 @@ class ConnectionHandler:
         """向在线设备直接发送一段 TTS 文本。"""
         if not self.websocket or self.stop_event.is_set():
             raise RuntimeError("设备连接不可用")
+        if self.tts is None:
+            try:
+                await asyncio.wait_for(self.tts_ready_event.wait(), timeout=30)
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError("设备语音服务仍在初始化") from exc
+        if not text or not text.strip():
+            raise ValueError("通知内容不能为空")
         if self.client_is_speaking:
             from core.handle.abortHandle import handleAbortMessage
 
@@ -1704,6 +1756,19 @@ class ConnectionHandler:
         from core.handle.intentHandler import speak_txt
 
         speak_txt(self, text)
+
+    def _mark_tts_ready(self, future):
+        """Release notification delivery only after TTS worker threads exist."""
+        try:
+            future.result()
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"TTS通道启动失败: {exc}")
+            return
+        self.tts_ready_event.set()
+        if self.server and self.server.http_server:
+            asyncio.create_task(
+                self.server.http_server.deliver_pending_notifications(self)
+            )
 
     def reset_audio_states(self):
         """
