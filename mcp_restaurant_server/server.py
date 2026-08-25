@@ -33,11 +33,16 @@ def load_restaurant_config() -> dict:
 
 RESTAURANT_CONFIG = load_restaurant_config()
 AMAP_KEY = RESTAURANT_CONFIG.get("amap_key", "")
-FIXED_LOCATION = RESTAURANT_CONFIG.get("location", {})
+FIXED_LOCATION = RESTAURANT_CONFIG.get("location") or {
+    "latitude": 29.712219,
+    "longitude": 106.787707,
+    "city": "重庆",
+    "region": "两江新区普福大道学生公寓",
+}
 
 TOOL = {
     "name": "find_nearby_restaurants",
-    "description": "根据当前公网IP定位位置，并查询附近的餐馆。IP定位通常只能精确到城市或区域。",
+    "description": "以重庆理工大学两江校区学生公寓为中心查询附近餐馆，不使用公网IP定位。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -55,7 +60,7 @@ TOOL = {
             },
             "ip": {
                 "type": "string",
-                "description": "可选的公网IP，留空则自动检测当前服务出口IP，便于测试。",
+                "description": "兼容旧参数，不使用。位置固定为重庆理工大学两江校区学生公寓。",
             },
             "latitude": {
                 "type": "number",
@@ -91,7 +96,7 @@ MEAL_TOOL = {
             },
             "ip": {
                 "type": "string",
-                "description": "可选的公网IP，留空则自动检测当前服务出口IP。",
+                "description": "兼容旧参数，不使用。位置固定为重庆理工大学两江校区学生公寓。",
             },
             "latitude": {
                 "type": "number",
@@ -178,8 +183,7 @@ async def resolve_location(client: httpx.AsyncClient, arguments: dict) -> dict:
         longitude = float(arguments.get("longitude"))
         return {"ip": "", "latitude": latitude, "longitude": longitude, "source": "tool"}
     except (TypeError, ValueError):
-        configured = get_configured_location()
-        return configured or await locate_ip(client, str(arguments.get("ip") or "").strip())
+        return get_configured_location()
 
 
 async def find_restaurants(arguments: dict) -> str:

@@ -8,7 +8,7 @@
 - 如果要从另一台机器连接，需要让 MCP 服务端口可以被小智服务器访问
 - 可选的 MCP Token，用于保护 WebSocket 接口
 
-IP 定位使用 ipify、ipinfo 和 ipapi 备用服务，默认不需要额外 Key。项目会优先使用开发板连接主服务时看到的 IP；如果设备在路由器后面，通常仍是公网出口 IP，不能替代 GPS。需要准确结果时，可在 `data/.config.yaml` 配置 `mcp.restaurant.location`。
+默认固定使用重庆理工大学两江校区学生公寓坐标，不使用公网 IP 定位。也可以在 `data/.config.yaml` 配置 `mcp.restaurant.location` 覆盖默认坐标。
 
 ## 启动
 
