@@ -21,7 +21,12 @@ TAG = __name__
 
 def detect_meal_request(text: str):
     """识别餐饮请求，返回用餐时段、菜品关键词和目标地点。"""
-    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃|想吃|换一家|换个吃的|换一张饭|换个饭", text):
+    food_request = re.search(
+        r"吃什么|吃啥|吃点什么|吃哪家|推荐.*[吃喝]|想吃|想喝|要吃|要喝|好饿|饿了|"
+        r"换一家|换一张饭|换个吃的|换个饭|换个喝的|来点吃的|来点喝的",
+        text,
+    )
+    if not food_request:
         return None
     if re.search(r"早上|早餐|早饭", text):
         period = "早餐"
@@ -34,10 +39,14 @@ def detect_meal_request(text: str):
         period = "早餐" if hour < 10 else "午餐" if hour < 16 else "晚餐"
 
     keyword = ""
-    match = re.search(r"想吃([\u4e00-\u9fff]{1,8})", text)
+    match = re.search(
+        r"(?:想吃|想喝|要吃|要喝|换一家|换一张饭|换个吃的|换个饭|换个喝的|来点吃的|来点喝的)"
+        r"([\u4e00-\u9fffA-Za-z0-9·]{1,12})",
+        text,
+    )
     if match:
-        keyword = re.sub(r"[了吧呢呀啊]$", "", match.group(1))
-        if keyword in {"什么", "点什么", "饭", "东西", "吃的"}:
+        keyword = re.sub(r"[了吧呢呀啊哦]$", "", match.group(1))
+        if keyword in {"什么", "点什么", "饭", "东西", "吃的", "喝的", "一家"}:
             keyword = ""
 
     nearby_place = "易美购" if "易美购" in text else ""
