@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Windows.UI.Notifications.Management;
 using WindowsNotificationListener.Models;
@@ -8,6 +8,9 @@ namespace WindowsNotificationListener;
 
 public sealed partial class MainWindow : Window
 {
+    private const string DefaultServerUrl = "ws://127.0.0.1:8005/ws/windows";
+    private const string DefaultDeviceId = "windows-pc-001";
+
     private readonly NotificationListenerService _service;
     private readonly string _configPath;
     private readonly string _logPath;
@@ -79,14 +82,14 @@ public sealed partial class MainWindow : Window
         try
         {
             var values = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(_configPath));
-            ServerUrlBox.Text = values.GetProperty("server_url").GetString() ?? "ws://127.0.0.1:8003/ws/windows";
-            DeviceIdBox.Text = values.GetProperty("device_id").GetString() ?? "windows-pc-001";
+            ServerUrlBox.Text = values.GetProperty("server_url").GetString() ?? DefaultServerUrl;
+            DeviceIdBox.Text = values.GetProperty("device_id").GetString() ?? DefaultDeviceId;
             TokenBox.Password = values.TryGetProperty("token", out var token) ? token.GetString() ?? string.Empty : string.Empty;
         }
         catch (Exception)
         {
-            ServerUrlBox.Text = "ws://127.0.0.1:8003/ws/windows";
-            DeviceIdBox.Text = "windows-pc-001";
+            ServerUrlBox.Text = DefaultServerUrl;
+            DeviceIdBox.Text = DefaultDeviceId;
         }
     }
 

@@ -11,7 +11,7 @@
             <Button Content="停止监听" Click="StopButton_Click" />
         </StackPanel>
         <TextBlock x:Name="StatusText" Text="状态：未授权" />
-        <TextBox x:Name="ServerUrlBox" Header="服务器 WS 地址" PlaceholderText="ws://127.0.0.1:8003/ws/windows" />
+        <TextBox x:Name="ServerUrlBox" Header="服务器 WS 地址" PlaceholderText="ws://127.0.0.1:8005/ws/windows" />
         <TextBox x:Name="DeviceIdBox" Header="设备 ID" PlaceholderText="windows-pc-001" />
         <PasswordBox x:Name="TokenBox" Header="令牌" />
         <TextBox x:Name="Output" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="220" />
