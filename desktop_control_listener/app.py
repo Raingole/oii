@@ -81,11 +81,10 @@ def open_application(name: str) -> None:
         # Duplicate shortcuts for the same name are harmless; use the first.
         os.startfile(exact[0][2])
         return
-    best = candidates[0]
-    if len(candidates) > 1 and best[0] - candidates[1][0] < 0.12:
-        options = "、".join(item[1] for item in candidates[:5])
-        raise ValueError(f"找到多个匹配项：{options}")
-    os.startfile(best[2])
+    # The highest score is the default for every fuzzy request. This keeps
+    # short names such as QQ, Steam, GPT, and 网易云 usable without asking
+    # the voice model to understand local shortcut paths.
+    os.startfile(candidates[0][2])
 
 
 def open_target(target: str, url: str = "", path: str = "", name: str = "") -> None:

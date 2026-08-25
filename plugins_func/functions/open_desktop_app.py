@@ -48,6 +48,11 @@ async def open_desktop_app(conn, target: str, url: str = "", path: str = "", nam
     url = str(url or "").strip()[:2048]
     path = str(path or "").strip()[:2048]
     name = str(name or "").strip()[:128]
+    # Some models put the spoken app name in target instead of name. Treat
+    # that form as an application lookup rather than rejecting it.
+    if target not in ALLOWED_TARGETS and not url and not path:
+        name = name or target
+        target = "application"
     if target not in ALLOWED_TARGETS:
         return ActionResponse(Action.ERROR, response="不支持打开这个电脑程序")
     if target == "browser":

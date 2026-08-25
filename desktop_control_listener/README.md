@@ -20,4 +20,4 @@ powershell -ExecutionPolicy Bypass -File .\desktop_control_listener\build-window
 
 生成 `D:\software\xiaozhi-desktop-control\xiaozhi-desktop-control.exe`。
 
-启动后填写 `ws://服务器地址:8003/api/desktop` 和服务器的 `server.desktop_token`，然后点击“启动监听”。程序会扫描开始菜单、桌面快捷方式和桌面文件夹；用户说“打开 GPT”“打开网易云”时按名称模糊匹配，只有唯一匹配才执行打开。
+启动后填写 `ws://服务器地址:8003/api/desktop` 和服务器的 `server.desktop_token`，然后点击“启动监听”。程序会扫描开始菜单、桌面快捷方式和桌面文件夹；用户说“打开 GPT”“打开 Steam”“打开网易云”“打开 QQ”“打开微信”时按名称相似度选择最匹配的项目并打开。
