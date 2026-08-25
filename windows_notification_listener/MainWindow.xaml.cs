@@ -53,7 +53,9 @@ public sealed partial class MainWindow : Window
 
     private void ShowError(Exception ex)
     {
-        StatusText.Text = $"错误：{ex.Message}";
-        File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:O}][WINDOWS][ERROR] {ex}{Environment.NewLine}");
+        var hresult = ex.HResult.ToString("X8");
+        StatusText.Text = $"错误：{ex.Message} (HRESULT=0x{hresult})";
+        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:O}][WINDOWS][ERROR] HRESULT=0x{hresult} {ex}{Environment.NewLine}");
     }
 }
