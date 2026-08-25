@@ -8,3 +8,6 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+windows_notification_listener/bin/
+windows_notification_listener/obj/

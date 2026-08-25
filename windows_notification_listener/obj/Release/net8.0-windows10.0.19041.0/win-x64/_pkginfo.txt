@@ -1,1 +1,0 @@
-D:\software\xiaozhi-notification-listener\msix\WindowsNotificationListener_1.0.0.0_x64_Test\WindowsNotificationListener_1.0.0.0_x64.msix
