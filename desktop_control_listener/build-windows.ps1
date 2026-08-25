@@ -12,4 +12,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --workpath "$env:TEMP\xiaozhi-desktop-control-build" `
     --specpath "$env:TEMP\xiaozhi-desktop-control-build" `
     "$PSScriptRoot\app.py"
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed with exit code $LASTEXITCODE. Close the running EXE and retry."
+}
 Write-Host "EXE created: $outputRoot\xiaozhi-desktop-control.exe"

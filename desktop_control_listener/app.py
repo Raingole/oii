@@ -5,6 +5,8 @@ import json
 import os
 import threading
 import webbrowser
+import difflib
+import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
 import tkinter as tk
@@ -21,12 +23,76 @@ TARGETS = {
 }
 
 
-def open_target(target: str, url: str = "", path: str = "") -> None:
+def normalize_name(value: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", value.casefold())
+
+
+def application_locations() -> list[Path]:
+    appdata = Path(os.environ.get("APPDATA", ""))
+    program_data = Path(os.environ.get("PROGRAMDATA", ""))
+    desktop = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
+    return [
+        appdata / "Microsoft/Windows/Start Menu/Programs",
+        program_data / "Microsoft/Windows/Start Menu/Programs",
+        desktop,
+    ]
+
+
+def scan_applications() -> list[tuple[str, str]]:
+    results = []
+    seen = set()
+    for root in application_locations():
+        if not root.is_dir():
+            continue
+        for item in root.rglob("*"):
+            if item.is_file() and item.suffix.casefold() not in {".lnk", ".url", ".exe"}:
+                continue
+            if not item.exists() or item.is_dir() and root.name != "Desktop":
+                continue
+            key = str(item).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append((item.stem if item.is_file() else item.name, str(item)))
+    return results
+
+
+def open_application(name: str) -> None:
+    query = normalize_name(name)
+    if not query:
+        raise ValueError("应用名称不能为空")
+    candidates = []
+    for title, path in scan_applications():
+        normalized = normalize_name(title)
+        if query == normalized:
+            score = 1.0
+        elif query in normalized:
+            score = 0.85
+        else:
+            score = difflib.SequenceMatcher(None, query, normalized).ratio()
+        if score >= 0.5:
+            candidates.append((score, title, path))
+    candidates.sort(reverse=True)
+    if not candidates:
+        raise ValueError(f"未找到与“{name}”匹配的应用或桌面项目")
+    best = candidates[0]
+    if len(candidates) > 1 and best[0] < 1.0 and best[0] - candidates[1][0] < 0.12:
+        options = "、".join(item[1] for item in candidates[:5])
+        raise ValueError(f"找到多个匹配项：{options}")
+    os.startfile(best[2])
+
+
+def open_target(target: str, url: str = "", path: str = "", name: str = "") -> None:
     if target == "browser":
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("网页地址必须使用 http 或 https")
         webbrowser.open(url)
+        return
+    if target == "application":
+        if url or path:
+            raise ValueError("模糊打开应用时不能带 url 或 path")
+        open_application(name)
         return
     if target not in TARGETS:
         if target != "path":
@@ -63,7 +129,7 @@ async def command_loop(endpoint: str, token: str, stop: threading.Event, on_stat
                         continue
                     status, error = "ok", ""
                     try:
-                        open_target(message.get("target", ""), message.get("url", ""), message.get("path", ""))
+                        open_target(message.get("target", ""), message.get("url", ""), message.get("path", ""), message.get("name", ""))
                     except Exception as exc:
                         status, error = "error", str(exc)
                         on_status(f"执行失败：{error}")

@@ -48,7 +48,7 @@ class DesktopControl:
             self.logger.bind(tag="desktop_control").info("桌面插件已断开")
         return websocket
 
-    async def open_app(self, target: str, url: str = "", path: str = "") -> dict[str, Any]:
+    async def open_app(self, target: str, url: str = "", path: str = "", name: str = "") -> dict[str, Any]:
         if not self.clients:
             return {"ok": False, "error": "没有在线的桌面插件"}
         command = {
@@ -61,6 +61,8 @@ class DesktopControl:
             command["url"] = url
         if path:
             command["path"] = path
+        if name:
+            command["name"] = name
         sent = 0
         for websocket in list(self.clients):
             try:
