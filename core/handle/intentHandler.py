@@ -1,6 +1,7 @@
 import json
 import uuid
 import asyncio
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +16,19 @@ from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
 TAG = __name__
+
+
+def detect_meal_period(text: str):
+    """识别用餐时段，供餐馆推荐走确定性工具调用。"""
+    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃", text):
+        return None
+    if re.search(r"早上|早餐|早饭", text):
+        return "早餐"
+    if re.search(r"中午|午餐|午饭", text):
+        return "午餐"
+    if re.search(r"晚上|晚餐|晚饭", text):
+        return "晚餐"
+    return None
 
 
 async def handle_user_intent(conn: "ConnectionHandler", text):
@@ -38,6 +52,9 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
         return True
 
     if conn.intent_type == "function_call":
+        meal_period = detect_meal_period(text)
+        if meal_period and getattr(conn, "func_handler", None):
+            return await recommend_meal_directly(conn, text, meal_period)
         # 使用支持function calling的聊天方法,不再进行意图分析
         return False
     # 使用LLM进行意图分析
@@ -63,6 +80,36 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
             await send_tts_message(conn, "stop", None)
             return True
     return False
+
+
+async def recommend_meal_directly(conn: "ConnectionHandler", text: str, meal_period: str):
+    """餐馆推荐不交给模型判断，确保只使用地图真实结果。"""
+    function_call_data = {
+        "name": "recommend_meal",
+        "id": str(uuid.uuid4().hex),
+        "arguments": json.dumps({"meal_period": meal_period}, ensure_ascii=False),
+    }
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    enqueue_tool_report(conn, "recommend_meal", {"meal_period": meal_period})
+
+    def process_function_call():
+        conn.dialogue.put(Message(role="user", content=text))
+        try:
+            result = asyncio.run_coroutine_threadsafe(
+                conn.func_handler.handle_llm_function_call(conn, function_call_data),
+                conn.loop,
+            ).result(timeout=int(conn.config.get("tool_call_timeout", 30)))
+            if result and result.action == Action.RESPONSE and result.response:
+                speak_txt(conn, result.response)
+            elif result and result.action in {Action.ERROR, Action.NOTFOUND}:
+                speak_txt(conn, result.response or result.result or "餐馆查询失败")
+        except Exception as exc:
+            conn.logger.bind(tag=TAG).error(f"确定性餐馆推荐失败: {exc}")
+            speak_txt(conn, "餐馆查询失败，请稍后再试。")
+
+    conn.executor.submit(process_function_call)
+    return True
 
 
 async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
