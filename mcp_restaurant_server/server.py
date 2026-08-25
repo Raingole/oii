@@ -126,7 +126,8 @@ async def find_restaurants(arguments: dict) -> str:
     if not AMAP_KEY:
         raise RuntimeError("MCP服务未配置 AMAP_KEY")
 
-    keyword = str(arguments.get("keyword") or "餐馆").strip()[:50]
+    requested_keyword = str(arguments.get("keyword") or "").strip()[:50]
+    keyword = requested_keyword or "餐馆"
     radius = max(100, min(int(arguments.get("radius", 3000)), 50000))
     limit = max(1, min(int(arguments.get("limit", 10)), 20))
 
@@ -136,8 +137,10 @@ async def find_restaurants(arguments: dict) -> str:
         params = {
             "key": AMAP_KEY,
             "location": f"{location['longitude']},{location['latitude']}",
-            "keywords": keyword,
+            "keywords": requested_keyword,
+            "types": "" if requested_keyword else "050000",
             "radius": radius,
+            "sortrule": "distance",
             "offset": limit,
             "page": 1,
             "extensions": "all",
