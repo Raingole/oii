@@ -96,10 +96,6 @@ class SimpleHttpServer:
 
     async def handle_notify(self, request):
         """接受桌面监听器消息并转为设备 TTS。"""
-        expected_token = self.config.get("server", {}).get("notification_token", "")
-        provided_token = request.headers.get("X-Notify-Token", "")
-        if not expected_token or provided_token != expected_token:
-            return web.json_response({"ok": False, "error": "通知接口未授权"}, status=401)
         if not self.websocket_server:
             return web.json_response({"ok": False, "error": "WebSocket服务未初始化"}, status=503)
         try:
@@ -107,13 +103,13 @@ class SimpleHttpServer:
         except (json.JSONDecodeError, ValueError):
             return web.json_response({"ok": False, "error": "请求必须是JSON"}, status=400)
 
-        device_id = str(payload.get("device_id", "")).strip()
         text = str(payload.get("text", "")).strip()
-        if not device_id or not text:
-            return web.json_response({"ok": False, "error": "缺少device_id或text"}, status=400)
-        conn = self.websocket_server.get_connection(device_id)
-        if not conn:
+        if not text:
+            return web.json_response({"ok": False, "error": "缺少text"}, status=400)
+        connections = list(self.websocket_server.connections.values())
+        if not connections:
             return web.json_response({"ok": False, "error": "设备当前不在线"}, status=404)
+        conn = connections[0]
         try:
             await conn.notify_text(text[:500])
         except Exception as exc:

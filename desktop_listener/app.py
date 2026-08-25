@@ -9,7 +9,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from listener import listen
+from listener import listen, UserNotificationListener, UserNotificationListenerAccessStatus
 
 
 def app_dir() -> Path:
@@ -22,7 +22,7 @@ class ListenerApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("小智消息监听")
-        self.root.geometry("460x250")
+        self.root.geometry("460x170")
         self.root.resizable(False, False)
         self.stop_event = None
         self.worker = None
@@ -31,13 +31,12 @@ class ListenerApp:
         frame = ttk.Frame(root, padding=14)
         frame.pack(fill="both", expand=True)
         self.server_url = self.add_field(frame, 0, "服务器地址", "http://36.212.7.43:8003/api/notify")
-        self.token = self.add_field(frame, 1, "通知令牌", "")
-        self.device_id = self.add_field(frame, 2, "开发板ID", "9c:13:9e:8a:0a:b0")
+        ttk.Label(frame, text="单设备模式").grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
         self.status = tk.StringVar(value="未启动")
-        ttk.Label(frame, textvariable=self.status).grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 8))
+        ttk.Label(frame, textvariable=self.status).grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 8))
         self.start_button = ttk.Button(frame, text="启动监听", command=self.start)
-        self.start_button.grid(row=4, column=0, padx=(0, 8), sticky="ew")
-        ttk.Button(frame, text="停止监听", command=self.stop).grid(row=4, column=1, sticky="ew")
+        self.start_button.grid(row=3, column=0, padx=(0, 8), sticky="ew")
+        ttk.Button(frame, text="停止监听", command=self.stop).grid(row=3, column=1, sticky="ew")
         frame.columnconfigure(1, weight=1)
         self.load_config()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -53,31 +52,34 @@ class ListenerApp:
         try:
             values = json.loads(self.config_path.read_text(encoding="utf-8"))
             self.server_url.set(values.get("server_url", self.server_url.get()))
-            self.token.set(values.get("token", ""))
-            self.device_id.set(values.get("device_id", self.device_id.get()))
         except (OSError, ValueError):
             pass
 
     def save_config(self):
         values = {
             "server_url": self.server_url.get().strip(),
-            "token": self.token.get().strip(),
-            "device_id": self.device_id.get().strip(),
         }
         self.config_path.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def start(self):
         if self.worker and self.worker.is_alive():
             return
-        if not all((self.server_url.get().strip(), self.token.get().strip(), self.device_id.get().strip())):
-            messagebox.showwarning("配置不完整", "请填写服务器地址、通知令牌和开发板ID")
+        if not self.server_url.get().strip():
+            messagebox.showwarning("配置不完整", "请填写服务器地址")
             return
         self.save_config()
+        try:
+            # Windows 要求通知权限申请在 UI 线程执行。
+            access = asyncio.run(UserNotificationListener.current.request_access_async())
+            if access != UserNotificationListenerAccessStatus.ALLOWED:
+                messagebox.showwarning("权限未开启", "请在 Windows 设置中允许本程序读取通知")
+                return
+        except Exception as exc:
+            messagebox.showerror("通知权限失败", str(exc))
+            return
         self.stop_event = threading.Event()
         args = Namespace(
             server_url=self.server_url.get().strip(),
-            token=self.token.get().strip(),
-            device_id=self.device_id.get().strip(),
             interval=1.0,
         )
         self.worker = threading.Thread(target=self.run_listener, args=(args,), daemon=True)
@@ -87,7 +89,7 @@ class ListenerApp:
 
     def run_listener(self, args):
         try:
-            asyncio.run(listen(args, self.stop_event))
+            asyncio.run(listen(args, self.stop_event, request_permission=False))
         except Exception as exc:
             self.root.after(0, lambda: messagebox.showerror("监听失败", str(exc)))
             self.root.after(0, lambda: self.status.set("启动失败"))

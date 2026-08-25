@@ -13,12 +13,7 @@ python -m pip install -r desktop_listener/requirements-windows.txt
 
 ## 服务器配置
 
-在服务器的 `data/.config.yaml` 增加令牌：
-
-```yaml
-server:
-  notification_token: "换成一串随机长令牌"
-```
+服务器会把通知发送到当前唯一在线的开发板，不需要令牌或设备 ID。
 
 ## 运行
 

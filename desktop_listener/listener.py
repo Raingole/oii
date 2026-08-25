@@ -30,11 +30,12 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-async def listen(args, stop_event=None) -> None:
+async def listen(args, stop_event=None, request_permission=True) -> None:
     listener = UserNotificationListener.current
-    access = await listener.request_access_async()
-    if access != UserNotificationListenerAccessStatus.ALLOWED:
-        raise RuntimeError("未获得Windows通知读取权限，请在系统设置中允许本程序访问通知")
+    if request_permission:
+        access = await listener.request_access_async()
+        if access != UserNotificationListenerAccessStatus.ALLOWED:
+            raise RuntimeError("未获得Windows通知读取权限，请在系统设置中允许本程序访问通知")
 
     session = requests.Session()
     known_ids = set()
@@ -52,12 +53,11 @@ async def listen(args, stop_event=None) -> None:
             text = clean_text(notification_text(notification))
             if not text:
                 continue
-            payload = {"device_id": args.device_id, "text": f"{app_name}收到消息：{text}"}
+            payload = {"text": f"{app_name}收到消息：{text}"}
             try:
                 response = session.post(
                     args.server_url,
                     json=payload,
-                    headers={"X-Notify-Token": args.token},
                     timeout=10,
                 )
                 response.raise_for_status()
@@ -72,8 +72,6 @@ async def listen(args, stop_event=None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="监听微信/QQ通知并转发到小智")
     parser.add_argument("--server-url", required=True, help="例如 http://36.212.7.43:8003/api/notify")
-    parser.add_argument("--token", required=True, help="服务器 notification_token")
-    parser.add_argument("--device-id", required=True, help="开发板 device-id，例如 9c:13:9e:8a:0a:b0")
     parser.add_argument("--interval", type=float, default=1.0)
     args = parser.parse_args()
     try:
