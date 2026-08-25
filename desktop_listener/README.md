@@ -23,3 +23,11 @@ server:
 ## 运行
 
 直接双击打包后的 `xiaozhi-message-listener.exe`，填写服务器地址、令牌和开发板 ID，点击“启动监听”。
+
+如果普通 exe 报 `0x80004001 尚未实现`，请使用 MSIX 版本。MSIX 需要 Windows SDK 的 `makeappx.exe` 和 `signtool.exe`，在项目目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop_listener\build-msix.ps1
+```
+
+先安装生成的 `.cer` 证书，再安装 `.msix`。安装后在 Windows 设置中允许“小智消息监听”访问通知。
