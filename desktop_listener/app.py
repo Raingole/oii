@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sys
 import threading
 from argparse import Namespace
@@ -14,7 +15,9 @@ from listener import listen, UserNotificationListener, UserNotificationListenerA
 
 def app_dir() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        config_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "XiaozhiMessageListener"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir
     return Path(__file__).resolve().parent
 
 
@@ -67,8 +70,8 @@ class ListenerApp:
         if not self.server_url.get().strip():
             messagebox.showwarning("配置不完整", "请填写服务器地址")
             return
-        self.save_config()
         try:
+            self.save_config()
             # Windows 要求通知权限申请在 UI 线程执行。
             access = asyncio.run(UserNotificationListener.current.request_access_async())
             if access != UserNotificationListenerAccessStatus.ALLOWED:

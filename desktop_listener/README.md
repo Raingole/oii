@@ -17,7 +17,7 @@ python -m pip install -r desktop_listener/requirements-windows.txt
 
 ## 运行
 
-直接双击打包后的 `xiaozhi-message-listener.exe`，填写服务器地址、令牌和开发板 ID，点击“启动监听”。
+直接打开安装后的“小智消息监听”，填写服务器地址，点击“启动监听”。MSIX 版本的配置保存在 `%LOCALAPPDATA%\XiaozhiMessageListener`。
 
 如果普通 exe 报 `0x80004001 尚未实现`，请使用 MSIX 版本。MSIX 需要 Windows SDK 的 `makeappx.exe` 和 `signtool.exe`，在项目目录执行：
 
