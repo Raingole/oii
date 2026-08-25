@@ -214,8 +214,21 @@ async def find_restaurants(arguments: dict) -> str:
         "radius_m": radius,
         "count": len(restaurants),
         "restaurants": restaurants,
-        "notice": "公网IP定位可能存在较大误差，结果仅供参考。",
+        "notice": "查询中心为固定坐标，结果仅供参考。",
     }
+    lines = [
+        f"高德地图查询中心：重庆理工大学两江校区学生公寓（经度{location['longitude']}，纬度{location['latitude']}）",
+        f"1公里内找到{len(restaurants)}家，以下店名、地址、距离和评分均来自高德地图，不得改写或编造：",
+    ]
+    for index, restaurant in enumerate(restaurants, 1):
+        details = [restaurant["name"], restaurant["address"] or "地址暂无"]
+        if restaurant["distance_m"]:
+            details.append(f"距离{restaurant['distance_m']}米")
+        if restaurant["rating"]:
+            details.append(f"评分{restaurant['rating']}")
+        lines.append(f"{index}. " + "｜".join(details))
+    result["action"] = "RESPONSE"
+    result["response"] = "\n".join(lines)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -234,17 +247,27 @@ async def recommend_meal(arguments: dict) -> str:
     restaurants = search_result.get("restaurants", [])
     if not restaurants:
         return json.dumps({
+            "action": "RESPONSE",
             "meal_period": period,
-            "message": "附近没有找到符合条件的餐馆，请扩大搜索范围或更换关键词。",
+            "response": "高德地图在固定位置1公里内没有找到符合条件的餐馆。",
+            "message": "附近没有找到符合条件的餐馆，请更换关键词。",
             "location": search_result.get("location", {}),
         }, ensure_ascii=False)
 
     recommendation = random.SystemRandom().choice(restaurants)
     return json.dumps({
+        "action": "RESPONSE",
         "meal_period": period,
+        "response": (
+            f"{period}推荐：{recommendation['name']}。"
+            f"地址：{recommendation['address'] or '地址暂无'}。"
+            f"距离：{recommendation['distance_m'] or '未知'}米。"
+            f"评分：{recommendation['rating'] or '暂无'}。"
+            "以上信息均来自高德地图。"
+        ),
         "recommendation": recommendation,
         "location": search_result.get("location", {}),
-        "notice": "这是从附近搜索结果中随机推荐的一家，公网IP定位可能存在较大误差。",
+        "notice": "这是从高德地图结果中随机推荐的一家，不包含虚构的店铺信息。",
     }, ensure_ascii=False)
 
 
