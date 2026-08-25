@@ -23,7 +23,15 @@ public sealed class WebSocketSenderService
 
     public WebSocketSenderService(Uri serverUri, string deviceId, string token, Action<string>? log)
     {
-        _serverUri = serverUri;
+        // The server authenticates the token at handshake time via the query
+        // string, so it must be part of the endpoint URL (same as the Python
+        // listeners), not only the register message.
+        var builder = new UriBuilder(serverUri);
+        var query = builder.Query?.TrimStart('?');
+        builder.Query = string.IsNullOrEmpty(query)
+            ? $"token={Uri.EscapeDataString(token)}"
+            : $"{query}&token={Uri.EscapeDataString(token)}";
+        _serverUri = builder.Uri;
         _deviceId = deviceId;
         _token = token;
         _log = log;
@@ -90,7 +98,17 @@ public sealed class WebSocketSenderService
         _log?.Invoke($"[WS][INFO] Connecting {_serverUri}");
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         connectCts.CancelAfter(TimeSpan.FromSeconds(10));
-        await socket.ConnectAsync(_serverUri, connectCts.Token);
+        var connectTask = socket.ConnectAsync(_serverUri, connectCts.Token);
+        var watchdog = Task.Delay(TimeSpan.FromSeconds(12), token);
+        if (await Task.WhenAny(connectTask, watchdog) == watchdog)
+        {
+            // ConnectAsync may ignore cancellation in some hosted
+            // environments; abort the socket so the loop always makes
+            // progress and the failure is visible in the log.
+            socket.Abort();
+            throw new TimeoutException("WebSocket handshake did not complete in 12s");
+        }
+        await connectTask;
         _log?.Invoke($"[WS][INFO] Connected {_serverUri}");
 
         await SendJsonAsync(socket, new

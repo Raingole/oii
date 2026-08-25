@@ -24,5 +24,6 @@
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
     <uap3:Capability Name="userNotificationListener" />
+    <Capability Name="internetClient" />
   </Capabilities>
 </Package>
