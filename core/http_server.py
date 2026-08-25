@@ -1,9 +1,11 @@
 import asyncio
 import json
+from collections import deque
 from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.desktop_control import DesktopControl
 
 TAG = __name__
 
@@ -15,6 +17,11 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        # Keep a small in-memory buffer so a notification is not lost while the
+        # board is reconnecting. This is intentionally not persistent storage.
+        self.pending_notifications = deque(maxlen=100)
+        self.notification_lock = asyncio.Lock()
+        self.desktop_control = DesktopControl(config, self.logger)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -75,6 +82,8 @@ class SimpleHttpServer:
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
                         web.post("/api/notify", self.handle_notify),
+                        web.get("/api/desktop", self.desktop_control.handle_websocket),
+                        web.get("/api/desktop/", self.desktop_control.handle_websocket),
                     ]
                 )
 
@@ -106,13 +115,29 @@ class SimpleHttpServer:
         text = str(payload.get("text", "")).strip()
         if not text:
             return web.json_response({"ok": False, "error": "缺少text"}, status=400)
-        connections = list(self.websocket_server.connections.values())
-        if not connections:
-            return web.json_response({"ok": False, "error": "设备当前不在线"}, status=404)
-        conn = connections[0]
-        try:
-            await conn.notify_text(text[:500])
-        except Exception as exc:
-            self.logger.bind(tag=TAG).error(f"下发通知失败: {exc}")
-            return web.json_response({"ok": False, "error": str(exc)}, status=503)
+        async with self.notification_lock:
+            connections = list(self.websocket_server.connections.values())
+            if not connections:
+                self.pending_notifications.append(text[:500])
+                return web.json_response({"ok": True, "queued": True}, status=202)
+            try:
+                await connections[0].notify_text(text[:500])
+            except Exception as exc:
+                self.pending_notifications.append(text[:500])
+                self.logger.bind(tag=TAG).error(f"下发通知失败，已排队: {exc}")
+                return web.json_response({"ok": False, "queued": True, "error": str(exc)}, status=503)
         return web.json_response({"ok": True})
+
+    async def deliver_pending_notifications(self, connection):
+        """Deliver buffered desktop notifications after a board reconnects."""
+        async with self.notification_lock:
+            while self.pending_notifications:
+                if self.websocket_server.get_connection(connection.device_id) is not connection:
+                    return
+                text = self.pending_notifications.popleft()
+                try:
+                    await connection.notify_text(text)
+                except Exception as exc:
+                    self.pending_notifications.appendleft(text)
+                    self.logger.bind(tag=TAG).warning(f"排队通知等待设备就绪: {exc}")
+                    return
