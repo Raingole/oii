@@ -13,6 +13,18 @@ if (-not (Test-Path -LiteralPath "$PSScriptRoot\app.py")) {
     --clean `
     --onefile `
     --windowed `
+    --hidden-import "winrt.windows.foundation" `
+    --hidden-import "winrt.windows.foundation.collections" `
+    --hidden-import "winrt.windows.system" `
+    --hidden-import "winrt.windows.system.remotesystems" `
+    --hidden-import "winrt.windows.system.diagnostics" `
+    --hidden-import "winrt.windows.storage" `
+    --hidden-import "winrt.windows.data.xml.dom" `
+    --hidden-import "winrt.windows.applicationmodel" `
+    --hidden-import "winrt.windows.applicationmodel.core" `
+    --hidden-import "winrt.windows.applicationmodel.activation" `
+    --hidden-import "winrt.windows.ui.notifications" `
+    --hidden-import "winrt.windows.ui.notifications.management" `
     --name "xiaozhi-message-listener" `
     --distpath $output `
     --workpath "$env:TEMP\xiaozhi-listener-build" `
