@@ -10,7 +10,7 @@ from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import ContentType
 from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
-from core.handle.sendAudioHandle import send_stt_message, send_tts_message
+from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
@@ -75,9 +75,7 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
         if text == cmd:
             conn.logger.bind(tag=TAG).info(f"识别到明确的退出命令: {text}")
             await send_stt_message(conn, text)
-            conn.close_after_chat = False
-            conn.reset_audio_states()
-            await send_tts_message(conn, "stop", None)
+            await conn.close()
             return True
     return False
 
