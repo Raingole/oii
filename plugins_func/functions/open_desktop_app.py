@@ -1,12 +1,13 @@
 """Open an approved desktop application or website through the companion app."""
 
 import json
+import os
 from urllib.parse import urlparse
 
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
 
-ALLOWED_TARGETS = {"browser", "notepad", "calculator", "explorer", "settings"}
+ALLOWED_TARGETS = {"browser", "notepad", "calculator", "explorer", "settings", "path"}
 
 
 @register_function(
@@ -15,18 +16,22 @@ ALLOWED_TARGETS = {"browser", "notepad", "calculator", "explorer", "settings"}
         "type": "function",
         "function": {
             "name": "open_desktop_app",
-            "description": "在已连接的电脑插件上打开指定软件或网页。只能打开 browser、notepad、calculator、explorer、settings；打开网页时必须提供 http 或 https 的 url。",
+            "description": "控制已连接的电脑。只有用户明确说‘打开浏览器’或‘用浏览器打开’时才使用 browser；普通‘打开某某’优先使用 Windows 程序或 path 打开本机 Windows/桌面中的应用和文件夹。打开网页时必须提供 http 或 https 的 url。禁止猜测或执行命令行。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "target": {
                         "type": "string",
                         "enum": sorted(ALLOWED_TARGETS),
-                        "description": "要打开的目标：browser浏览器、notepad记事本、calculator计算器、explorer文件管理器、settings系统设置。",
+                        "description": "目标：browser浏览器（仅明确提到浏览器时）、notepad记事本、calculator计算器、explorer文件管理器、settings系统设置、path本机 Windows 或桌面路径。",
                     },
                     "url": {
                         "type": "string",
                         "description": "仅 browser 使用，必须是 http:// 或 https:// 地址。",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "仅 path 使用。Windows 或当前用户桌面中的已存在文件/文件夹完整路径。",
                     },
                 },
                 "required": ["target"],
@@ -35,16 +40,28 @@ ALLOWED_TARGETS = {"browser", "notepad", "calculator", "explorer", "settings"}
     },
     type=ToolType.SYSTEM_CTL,
 )
-async def open_desktop_app(conn, target: str, url: str = "") -> ActionResponse:
+async def open_desktop_app(conn, target: str, url: str = "", path: str = "") -> ActionResponse:
     target = str(target or "").strip().lower()
     url = str(url or "").strip()[:2048]
+    path = str(path or "").strip()[:2048]
     if target not in ALLOWED_TARGETS:
         return ActionResponse(Action.ERROR, response="不支持打开这个电脑程序")
     if target == "browser":
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return ActionResponse(Action.ERROR, response="请提供有效的 http 或 https 网页地址")
-    elif url:
+    elif target == "path":
+        if url or not path:
+            return ActionResponse(Action.ERROR, response="打开本机路径时必须提供 path，不能提供 url")
+        normalized = os.path.normcase(os.path.abspath(os.path.expandvars(path)))
+        windows_root = os.path.normcase(os.environ.get("WINDIR", r"C:\Windows"))
+        desktop_root = os.path.normcase(os.path.join(os.path.expanduser("~"), "Desktop"))
+        if not os.path.exists(normalized) or not (
+            normalized == windows_root or normalized.startswith(windows_root + os.sep)
+            or normalized == desktop_root or normalized.startswith(desktop_root + os.sep)
+        ):
+            return ActionResponse(Action.ERROR, response="path 只能是已存在的 Windows 或桌面路径")
+    elif url or path:
         return ActionResponse(Action.ERROR, response="打开电脑软件时不能提供 url")
 
     server = getattr(conn, "server", None)
@@ -54,7 +71,7 @@ async def open_desktop_app(conn, target: str, url: str = "") -> ActionResponse:
         control = getattr(http_server, "desktop_control", None)
     if control is None:
         return ActionResponse(Action.ERROR, response="电脑控制功能未启用")
-    result = await control.open_app(target, url)
+    result = await control.open_app(target, url, path)
     if not result.get("ok"):
         return ActionResponse(Action.ERROR, result=json.dumps(result, ensure_ascii=False), response=result["error"])
     return ActionResponse(

@@ -21,7 +21,7 @@ TARGETS = {
 }
 
 
-def open_target(target: str, url: str = "") -> None:
+def open_target(target: str, url: str = "", path: str = "") -> None:
     if target == "browser":
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -29,9 +29,22 @@ def open_target(target: str, url: str = "") -> None:
         webbrowser.open(url)
         return
     if target not in TARGETS:
-        raise ValueError("服务器下发了不支持的程序")
-    if url:
-        raise ValueError("打开软件时不能带网页地址")
+        if target != "path":
+            raise ValueError("服务器下发了不支持的程序")
+        if url or not path:
+            raise ValueError("打开本机路径时必须提供 path")
+        normalized = os.path.normcase(os.path.abspath(os.path.expandvars(path)))
+        windows_root = os.path.normcase(os.environ.get("WINDIR", r"C:\Windows"))
+        desktop_root = os.path.normcase(os.path.join(os.path.expanduser("~"), "Desktop"))
+        if not os.path.exists(normalized) or not (
+            normalized == windows_root or normalized.startswith(windows_root + os.sep)
+            or normalized == desktop_root or normalized.startswith(desktop_root + os.sep)
+        ):
+            raise ValueError("path 只能是已存在的 Windows 或桌面路径")
+        os.startfile(normalized)
+        return
+    if url or path:
+        raise ValueError("打开软件时不能带网页地址或路径")
     os.startfile(TARGETS[target])
 
 
@@ -50,7 +63,7 @@ async def command_loop(endpoint: str, token: str, stop: threading.Event, on_stat
                         continue
                     status, error = "ok", ""
                     try:
-                        open_target(message.get("target", ""), message.get("url", ""))
+                        open_target(message.get("target", ""), message.get("url", ""), message.get("path", ""))
                     except Exception as exc:
                         status, error = "error", str(exc)
                         on_status(f"执行失败：{error}")
