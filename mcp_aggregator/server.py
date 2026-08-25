@@ -186,7 +186,7 @@ async def handle(websocket) -> None:
                         "jsonrpc": "2.0", "id": request_id, "result": result
                     }, ensure_ascii=False))
                 except Exception as exc:
-                    await send_error(websocket, request_id, -32000, str(exc))
+                    await send_error(websocket, request_id, -32000, str(exc) or exc.__class__.__name__)
             elif request_id is not None:
                 await send_error(websocket, request_id, -32601, f"不支持的方法: {method}")
     finally:

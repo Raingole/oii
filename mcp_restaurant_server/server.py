@@ -1,6 +1,7 @@
 """WebSocket MCP service for IP geolocation and nearby restaurant search."""
 
 import json
+import ipaddress
 import os
 import random
 import sys
@@ -20,17 +21,19 @@ IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 AMAP_URL = "https://restapi.amap.com/v3/place/around"
 
 
-def load_amap_key() -> str:
+def load_restaurant_config() -> dict:
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", ".config.yaml")
     try:
         with open(config_path, "r", encoding="utf-8") as config_file:
             config = yaml.safe_load(config_file) or {}
-        return config.get("mcp", {}).get("restaurant", {}).get("amap_key", "")
+        return config.get("mcp", {}).get("restaurant", {})
     except (OSError, yaml.YAMLError):
-        return ""
+        return {}
 
 
-AMAP_KEY = load_amap_key()
+RESTAURANT_CONFIG = load_restaurant_config()
+AMAP_KEY = RESTAURANT_CONFIG.get("amap_key", "")
+FIXED_LOCATION = RESTAURANT_CONFIG.get("location", {})
 
 TOOL = {
     "name": "find_nearby_restaurants",
@@ -53,6 +56,14 @@ TOOL = {
             "ip": {
                 "type": "string",
                 "description": "可选的公网IP，留空则自动检测当前服务出口IP，便于测试。",
+            },
+            "latitude": {
+                "type": "number",
+                "description": "可选的精确纬度；与longitude同时提供时优先使用。",
+            },
+            "longitude": {
+                "type": "number",
+                "description": "可选的精确经度；与latitude同时提供时优先使用。",
             },
         },
         "required": [],
@@ -82,6 +93,14 @@ MEAL_TOOL = {
                 "type": "string",
                 "description": "可选的公网IP，留空则自动检测当前服务出口IP。",
             },
+            "latitude": {
+                "type": "number",
+                "description": "可选的精确纬度；与longitude同时提供时优先使用。",
+            },
+            "longitude": {
+                "type": "number",
+                "description": "可选的精确经度；与latitude同时提供时优先使用。",
+            },
         },
         "required": ["meal_period"],
     },
@@ -89,8 +108,13 @@ MEAL_TOOL = {
 
 
 async def fetch_json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> dict:
-    response = await client.get(url, **kwargs)
-    response.raise_for_status()
+    try:
+        response = await client.get(url, **kwargs)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"请求服务超时: {url}") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"请求服务失败: {url} ({exc})") from exc
     data = response.json()
     if not isinstance(data, dict):
         raise RuntimeError("定位服务返回格式错误")
@@ -98,19 +122,28 @@ async def fetch_json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> dict
 
 
 async def locate_ip(client: httpx.AsyncClient, ip: str = "") -> dict:
+    try:
+        if ip and ipaddress.ip_address(ip).is_private:
+            ip = ""
+    except ValueError:
+        ip = ""
     if not ip:
         data = await fetch_json(client, "https://api.ipify.org", params={"format": "json"})
         ip = data.get("ip", "")
     if not ip:
         raise RuntimeError("无法获取当前公网IP")
 
-    params = {}
-    if IPINFO_TOKEN:
-        params["token"] = IPINFO_TOKEN
-    location = await fetch_json(client, f"https://ipinfo.io/{ip}/json", params=params)
-    coordinates = location.get("loc", "").split(",")
-    if len(coordinates) != 2:
-        raise RuntimeError("IP定位服务未返回有效经纬度")
+    params = {"token": IPINFO_TOKEN} if IPINFO_TOKEN else {}
+    try:
+        location = await fetch_json(client, f"https://ipinfo.io/{ip}/json", params=params)
+        coordinates = location.get("loc", "").split(",")
+        if len(coordinates) != 2:
+            raise RuntimeError("IP定位服务未返回有效经纬度")
+    except Exception:
+        location = await fetch_json(client, f"https://ipapi.co/{ip}/json/")
+        coordinates = [location.get("latitude"), location.get("longitude")]
+        if not all(value is not None for value in coordinates):
+            raise RuntimeError("备用IP定位服务未返回有效经纬度")
 
     return {
         "ip": ip,
@@ -120,6 +153,33 @@ async def locate_ip(client: httpx.AsyncClient, ip: str = "") -> dict:
         "region": location.get("region", ""),
         "country": location.get("country", ""),
     }
+
+
+def get_configured_location() -> dict | None:
+    try:
+        latitude = float(FIXED_LOCATION.get("latitude"))
+        longitude = float(FIXED_LOCATION.get("longitude"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return {
+        "ip": "",
+        "latitude": latitude,
+        "longitude": longitude,
+        "city": FIXED_LOCATION.get("city", ""),
+        "region": FIXED_LOCATION.get("region", ""),
+        "country": FIXED_LOCATION.get("country", ""),
+        "source": "config",
+    }
+
+
+async def resolve_location(client: httpx.AsyncClient, arguments: dict) -> dict:
+    try:
+        latitude = float(arguments.get("latitude"))
+        longitude = float(arguments.get("longitude"))
+        return {"ip": "", "latitude": latitude, "longitude": longitude, "source": "tool"}
+    except (TypeError, ValueError):
+        configured = get_configured_location()
+        return configured or await locate_ip(client, str(arguments.get("ip") or "").strip())
 
 
 async def find_restaurants(arguments: dict) -> str:
@@ -133,7 +193,7 @@ async def find_restaurants(arguments: dict) -> str:
 
     timeout = httpx.Timeout(15.0)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        location = await locate_ip(client, str(arguments.get("ip") or "").strip())
+        location = await resolve_location(client, arguments)
         params = {
             "key": AMAP_KEY,
             "location": f"{location['longitude']},{location['latitude']}",
@@ -185,6 +245,8 @@ async def recommend_meal(arguments: dict) -> str:
         "radius": arguments.get("radius", 3000),
         "limit": 20,
         "ip": arguments.get("ip", ""),
+        "latitude": arguments.get("latitude"),
+        "longitude": arguments.get("longitude"),
     }
     search_result = json.loads(await find_restaurants(search_arguments))
     restaurants = search_result.get("restaurants", [])
@@ -269,7 +331,7 @@ async def handle(websocket):
                     result = {"content": [{"type": "text", "text": text}]}
                     await websocket.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}, ensure_ascii=False))
                 except Exception as exc:
-                    await send_error(websocket, request_id, -32000, str(exc))
+                    await send_error(websocket, request_id, -32000, str(exc) or exc.__class__.__name__)
             elif request_id is not None:
                 await send_error(websocket, request_id, -32601, f"不支持的方法: {method}")
         except (json.JSONDecodeError, TypeError) as exc:

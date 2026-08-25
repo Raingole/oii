@@ -32,6 +32,11 @@ class MCPEndpointExecutor(ToolExecutor):
             # 转换参数为JSON字符串
             import json
 
+            # 将开发板连接到主服务时看到的IP传给位置类MCP工具。
+            if tool_name in {"find_nearby_restaurants", "recommend_meal"}:
+                if getattr(conn, "client_ip", None) and "ip" not in arguments:
+                    arguments["ip"] = conn.client_ip
+
             args_str = json.dumps(arguments) if arguments else "{}"
 
             # 调用MCP接入点工具
