@@ -6,6 +6,7 @@ from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 from core.desktop_control import DesktopControl
+from core.notification_hub import WindowsNotificationHub
 
 TAG = __name__
 
@@ -22,6 +23,7 @@ class SimpleHttpServer:
         self.pending_notifications = deque(maxlen=100)
         self.notification_lock = asyncio.Lock()
         self.desktop_control = DesktopControl(config, self.logger)
+        self.notification_hub = WindowsNotificationHub(config, self.logger)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -84,6 +86,8 @@ class SimpleHttpServer:
                         web.post("/api/notify", self.handle_notify),
                         web.get("/api/desktop", self.desktop_control.handle_websocket),
                         web.get("/api/desktop/", self.desktop_control.handle_websocket),
+                        web.get("/ws/windows", self.notification_hub.handle_websocket),
+                        web.get("/ws/windows/", self.notification_hub.handle_websocket),
                     ]
                 )
 
