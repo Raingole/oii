@@ -73,10 +73,17 @@ async def main():
     ws_task = asyncio.create_task(ws_server.start())
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config, ws_server)
+    ws_server.http_server = ota_server
+    ws_server.desktop_control = ota_server.desktop_control
     ota_task = asyncio.create_task(ota_server.start())
 
     read_config_from_api = config.get("read_config_from_api", False)
     port = int(config["server"].get("http_port", 8003))
+    logger.bind(tag=TAG).info(
+        "桌面控制WebSocket地址是\tws://{}:{}/api/desktop",
+        get_local_ip(),
+        port,
+    )
     if not read_config_from_api:
         logger.bind(tag=TAG).info(
             "OTA接口是\t\thttp://{}:{}/xiaozhi/ota/",

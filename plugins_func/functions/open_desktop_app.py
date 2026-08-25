@@ -47,8 +47,11 @@ async def open_desktop_app(conn, target: str, url: str = "") -> ActionResponse:
     elif url:
         return ActionResponse(Action.ERROR, response="打开电脑软件时不能提供 url")
 
-    http_server = getattr(getattr(conn, "server", None), "http_server", None)
-    control = getattr(http_server, "desktop_control", None)
+    server = getattr(conn, "server", None)
+    control = getattr(server, "desktop_control", None)
+    if control is None:
+        http_server = getattr(server, "http_server", None)
+        control = getattr(http_server, "desktop_control", None)
     if control is None:
         return ActionResponse(Action.ERROR, response="电脑控制功能未启用")
     result = await control.open_app(target, url)

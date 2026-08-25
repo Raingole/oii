@@ -45,6 +45,10 @@ class WebSocketServer:
         self.logger = setup_logging(config)
         self.config_lock = asyncio.Lock()
         self.connections = {}
+        self.http_server = None
+        # Shared by server-side tools so desktop control does not depend on an
+        # HTTP server back-reference being populated in a particular order.
+        self.desktop_control = None
         modules = initialize_modules(
             self.logger,
             self.config,
@@ -73,6 +77,8 @@ class WebSocketServer:
         if conn.device_id:
             self.connections[conn.device_id] = conn
             self.logger.bind(tag=TAG).info(f"设备已注册通知连接: {conn.device_id}")
+            if self.http_server is not None:
+                asyncio.create_task(self.http_server.deliver_pending_notifications(conn))
 
     def unregister_connection(self, conn):
         if conn.device_id and self.connections.get(conn.device_id) is conn:
