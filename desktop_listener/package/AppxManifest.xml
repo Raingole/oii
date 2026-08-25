@@ -5,7 +5,7 @@
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap3 rescap">
-  <Identity Name="XiaozhiMessageListener" Publisher="CN=XiaozhiMessageListenerSigner" Version="1.0.0.3" />
+  <Identity Name="XiaozhiMessageListener" Publisher="CN=XiaozhiMessageListenerSigner" Version="1.0.0.4" />
   <Properties>
     <DisplayName>小智消息监听</DisplayName>
     <PublisherDisplayName>小智</PublisherDisplayName>

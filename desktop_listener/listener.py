@@ -30,6 +30,10 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+async def request_notification_access():
+    return await UserNotificationListener.current.request_access_async()
+
+
 async def listen(args, stop_event=None, request_permission=True) -> None:
     listener = UserNotificationListener.current
     if request_permission:

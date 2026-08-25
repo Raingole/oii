@@ -10,7 +10,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from listener import listen, UserNotificationListener, UserNotificationListenerAccessStatus
+from listener import listen, request_notification_access, UserNotificationListenerAccessStatus
 
 
 def app_dir() -> Path:
@@ -73,7 +73,7 @@ class ListenerApp:
         try:
             self.save_config()
             # Windows 要求通知权限申请在 UI 线程执行。
-            access = asyncio.run(UserNotificationListener.current.request_access_async())
+            access = asyncio.run(request_notification_access())
             if access != UserNotificationListenerAccessStatus.ALLOWED:
                 messagebox.showwarning("权限未开启", "请在 Windows 设置中允许本程序读取通知")
                 return
