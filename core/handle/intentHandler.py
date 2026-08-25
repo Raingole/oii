@@ -2,6 +2,7 @@ import json
 import uuid
 import asyncio
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,17 +19,29 @@ from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 TAG = __name__
 
 
-def detect_meal_period(text: str):
-    """识别用餐时段，供餐馆推荐走确定性工具调用。"""
-    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃", text):
+def detect_meal_request(text: str):
+    """识别餐饮请求，返回用餐时段、菜品关键词和目标地点。"""
+    if not re.search(r"吃什么|吃啥|吃点什么|吃哪家|推荐.*吃|想吃|换一家|换个吃的", text):
         return None
     if re.search(r"早上|早餐|早饭", text):
-        return "早餐"
-    if re.search(r"中午|午餐|午饭", text):
-        return "午餐"
-    if re.search(r"晚上|晚餐|晚饭", text):
-        return "晚餐"
-    return None
+        period = "早餐"
+    elif re.search(r"中午|午餐|午饭", text):
+        period = "午餐"
+    elif re.search(r"晚上|晚餐|晚饭", text):
+        period = "晚餐"
+    else:
+        hour = datetime.now().hour
+        period = "早餐" if hour < 10 else "午餐" if hour < 16 else "晚餐"
+
+    keyword = ""
+    match = re.search(r"想吃([\u4e00-\u9fff]{1,8})", text)
+    if match:
+        keyword = re.sub(r"[了吧呢呀啊]$", "", match.group(1))
+        if keyword in {"什么", "点什么", "饭", "东西", "吃的"}:
+            keyword = ""
+
+    nearby_place = "易美购" if "易美购" in text else ""
+    return period, keyword, nearby_place
 
 
 async def handle_user_intent(conn: "ConnectionHandler", text):
@@ -52,9 +65,9 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
         return True
 
     if conn.intent_type == "function_call":
-        meal_period = detect_meal_period(text)
-        if meal_period and getattr(conn, "func_handler", None):
-            return await recommend_meal_directly(conn, text, meal_period)
+        meal_request = detect_meal_request(text)
+        if meal_request and getattr(conn, "func_handler", None):
+            return await recommend_meal_directly(conn, text, *meal_request)
         # 使用支持function calling的聊天方法,不再进行意图分析
         return False
     # 使用LLM进行意图分析
@@ -80,16 +93,26 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
     return False
 
 
-async def recommend_meal_directly(conn: "ConnectionHandler", text: str, meal_period: str):
+async def recommend_meal_directly(
+    conn: "ConnectionHandler", text: str, meal_period: str, keyword: str = "", nearby_place: str = ""
+):
     """餐馆推荐不交给模型判断，确保只使用地图真实结果。"""
     function_call_data = {
         "name": "recommend_meal",
         "id": str(uuid.uuid4().hex),
-        "arguments": json.dumps({"meal_period": meal_period}, ensure_ascii=False),
+        "arguments": json.dumps({
+            "meal_period": meal_period,
+            "keyword": keyword,
+            "nearby_place": nearby_place,
+        }, ensure_ascii=False),
     }
     await send_stt_message(conn, text)
     conn.client_abort = False
-    enqueue_tool_report(conn, "recommend_meal", {"meal_period": meal_period})
+    enqueue_tool_report(conn, "recommend_meal", {
+        "meal_period": meal_period,
+        "keyword": keyword,
+        "nearby_place": nearby_place,
+    })
 
     def process_function_call():
         conn.dialogue.put(Message(role="user", content=text))
