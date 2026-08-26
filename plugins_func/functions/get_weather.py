@@ -71,8 +71,8 @@ async def _get_json(client, url: str, api_key: str, params: dict[str, Any] | Non
         return None
     if response.status_code >= 400 or data.get("code") != "200":
         logger.bind(tag=TAG).error(
-            "和风天气接口返回错误：HTTP %s，code=%s，detail=%s",
-            response.status_code, data.get("code"), data.get("detail", ""),
+            f"和风天气接口返回错误：HTTP {response.status_code}，"
+            f"code={data.get('code')}，detail={data.get('detail', '')}"
         )
         return None
     return data
