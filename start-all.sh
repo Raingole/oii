@@ -105,7 +105,7 @@ start_mcp() {
 }
 
 start_ui() {
-    local port="${UI_PORT:-8080}"
+    local port="${UI_PORT:-8010}"
     local log_file="${LOG_DIR}/ui.log"
     [[ -f "${ROOT_DIR}/ui_server.py" ]] || {
         echo "[ERROR] oii 前端服务不存在: ${ROOT_DIR}/ui_server.py" >&2
@@ -124,6 +124,7 @@ start_ui() {
         echo "[ERROR] oii 前端启动失败，日志: ${log_file}" >&2
         exit 1
     fi
+    echo "[INFO] 网页启动成功，地址：http://36.212.7.43:${port}/"
 }
 
 # MCP 后端使用 8766，聚合器使用 8765（小智只连接聚合器）

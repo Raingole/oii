@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from collections import deque
 from aiohttp import web
 from config.logger import setup_logging
@@ -76,6 +77,9 @@ class SimpleHttpServer:
                 # 添加路由
                 app.add_routes(
                     [
+                        web.get("/", self.handle_ui_index),
+                        web.get("/styles.css", self.handle_ui_styles),
+                        web.get("/app.js", self.handle_ui_app),
                         web.get("/mcp/vision/explain", self.vision_handler.handle_get),
                         web.post(
                             "/mcp/vision/explain", self.vision_handler.handle_post
@@ -106,6 +110,17 @@ class SimpleHttpServer:
 
             self.logger.bind(tag=TAG).error(f"错误堆栈: {traceback.format_exc()}")
             raise
+
+    async def handle_ui_index(self, request):
+        """Serve the oii voice guide through the existing public HTTP port."""
+        index_path = Path(__file__).resolve().parents[1] / "ui" / "index.html"
+        return web.FileResponse(index_path)
+
+    async def handle_ui_styles(self, request):
+        return web.FileResponse(Path(__file__).resolve().parents[1] / "ui" / "styles.css")
+
+    async def handle_ui_app(self, request):
+        return web.FileResponse(Path(__file__).resolve().parents[1] / "ui" / "app.js")
 
     async def deliver_notification(self, text: str) -> bool:
         """Send text to the ESP board via server TTS; queue while offline."""
