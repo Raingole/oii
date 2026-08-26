@@ -38,11 +38,26 @@ command -v "${PYTHON_BIN}" >/dev/null 2>&1 || {
 
 mkdir -p "${LOG_DIR}" "${ROOT_DIR}/data/memory"
 
-if ! grep -q "Memory: server_longterm" "${ROOT_DIR}/config.yaml"; then
-    echo "[WARN] config.yaml 未启用 server_longterm，长期记忆可能不会保存" >&2
+memory_config_ok=false
+if grep -Eq '^[[:space:]]*Memory:[[:space:]]*server_longterm[[:space:]]*$' "${ROOT_DIR}/config.yaml" \
+    || grep -Eq '^[[:space:]]*Memory:[[:space:]]*server_longterm[[:space:]]*$' "${ROOT_DIR}/data/.config.yaml" 2>/dev/null; then
+    memory_config_ok=true
 fi
 
-echo "[INFO] 长期记忆数据库目录: ${ROOT_DIR}/data/memory"
+memory_write_ok=false
+memory_probe="${ROOT_DIR}/data/memory/.write-test"
+if touch "${memory_probe}" 2>/dev/null; then
+    rm -f "${memory_probe}"
+    memory_write_ok=true
+fi
+
+if [[ "${memory_config_ok}" == true && "${memory_write_ok}" == true ]]; then
+    echo "[OK] 长期记忆配置成功：server_longterm，数据库目录 ${ROOT_DIR}/data/memory"
+else
+    echo "[ERROR] 长期记忆配置失败：配置=${memory_config_ok}，目录可写=${memory_write_ok}" >&2
+    echo "[ERROR] 请检查 config.yaml 的 selected_module.Memory 和 data/memory 写入权限" >&2
+    exit 1
+fi
 cd "${ROOT_DIR}"
 
 export MCP_BACKENDS="${MCP_BACKENDS:-restaurant=ws://127.0.0.1:8766/mcp/}"
