@@ -42,6 +42,8 @@ FIXED_LOCATION = RESTAURANT_CONFIG.get("location") or {
     "city": "重庆",
     "region": "两江新区普福大道学生公寓",
 }
+FIXED_LOCATION_NAME = "重庆理工大学两江校区"
+RESTAURANT_MAX_RADIUS_M = 3000
 
 TOOL = {
     "name": "find_nearby_restaurants",
@@ -175,7 +177,7 @@ async def locate_ip(client: httpx.AsyncClient, ip: str = "") -> dict:
     }
 
 
-async def locate_place(client: httpx.AsyncClient, place_name: str) -> dict:
+async def locate_place(client: httpx.AsyncClient, place_name: str, local_only: bool = False) -> dict:
     data = await fetch_json(
         client,
         AMAP_TEXT_URL,
@@ -183,8 +185,8 @@ async def locate_place(client: httpx.AsyncClient, place_name: str) -> dict:
             "key": AMAP_KEY,
             "keywords": place_name,
             "city": "重庆",
-            "citylimit": "true",
-            "offset": 1,
+            "citylimit": "true" if local_only else "false",
+            "offset": 10,
             "page": 1,
             "extensions": "all",
             "output": "json",
@@ -224,7 +226,7 @@ async def estimate_route(arguments: dict) -> str:
         raise RuntimeError("MCP服务未配置固定起点坐标")
     timeout = httpx.Timeout(15.0)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        destination = await locate_place(client, destination_name)
+        destination = await locate_place(client, destination_name, local_only=False)
         data = await fetch_json(
             client,
             AMAP_DRIVING_URL if mode == "driving" else AMAP_WALKING_URL,
@@ -273,6 +275,7 @@ def get_configured_location() -> dict | None:
         "region": FIXED_LOCATION.get("region", ""),
         "country": FIXED_LOCATION.get("country", ""),
         "source": "config",
+        "name": FIXED_LOCATION_NAME,
     }
 
 
@@ -287,16 +290,12 @@ async def find_restaurants(arguments: dict) -> str:
     requested_keyword = str(arguments.get("keyword") or "").strip()[:50]
     nearby_place = str(arguments.get("nearby_place") or "").strip()[:50]
     keyword = requested_keyword or "餐饮服务"
-    radius = 1000
+    radius = RESTAURANT_MAX_RADIUS_M
     limit = max(1, min(int(arguments.get("limit", 10)), 20))
 
     timeout = httpx.Timeout(15.0)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        location = (
-            await locate_place(client, nearby_place)
-            if nearby_place
-            else await resolve_location(client, arguments)
-        )
+        location = await resolve_location(client, arguments)
         params = {
             "key": AMAP_KEY,
             "location": f"{location['longitude']},{location['latitude']}",
@@ -315,7 +314,12 @@ async def find_restaurants(arguments: dict) -> str:
         raise RuntimeError(f"高德地图查询失败：{data.get('info', '未知错误')}")
 
     restaurants = []
-    for poi in data.get("pois", [])[:limit]:
+    for poi in data.get("pois", []):
+        try:
+            if float(poi.get("distance", radius + 1)) > radius:
+                continue
+        except (TypeError, ValueError):
+            continue
         restaurants.append(
             {
                 "name": poi.get("name", ""),
@@ -326,6 +330,8 @@ async def find_restaurants(arguments: dict) -> str:
                 "rating": poi.get("biz_ext", {}).get("rating", ""),
             }
         )
+        if len(restaurants) >= limit:
+            break
 
     result = {
         "location": location,
@@ -340,6 +346,7 @@ async def find_restaurants(arguments: dict) -> str:
         f"高德地图查询中心：{result['location_name']}（经度{location['longitude']}，纬度{location['latitude']}）",
         f"1公里内找到{len(restaurants)}家，以下店名、地址、距离和评分均来自高德地图，不得改写或编造：",
     ]
+    lines[1] = f"固定位置 {RESTAURANT_MAX_RADIUS_M // 1000} 公里内找到 {len(restaurants)} 家餐厅，以下信息来自高德地图："
     for index, restaurant in enumerate(restaurants, 1):
         details = [restaurant["name"], restaurant["address"] or "地址暂无"]
         if restaurant["distance_m"]:
