@@ -69,10 +69,12 @@ async def _get_json(client, url: str, api_key: str, params: dict[str, Any] | Non
     except (httpx.HTTPError, ValueError) as exc:
         logger.bind(tag=TAG).error("和风天气请求失败：%s", exc)
         return None
-    if response.status_code >= 400 or data.get("code") != "200":
+    api_code = data.get("code")
+    has_weather_payload = any(key in data for key in ("condition", "temperature", "now", "current"))
+    if response.status_code >= 400 or (api_code is not None and str(api_code) != "200") or (api_code is None and not has_weather_payload and "location" not in data):
         logger.bind(tag=TAG).error(
             f"和风天气接口返回错误：HTTP {response.status_code}，"
-            f"code={data.get('code')}，detail={data.get('detail', '')}"
+            f"code={api_code}，detail={data.get('detail', '')}，fields={list(data.keys())}"
         )
         return None
     return data
@@ -92,6 +94,35 @@ def _number(value: Any, digits: int = 1) -> str:
         return f"{float(value):.{digits}f}"
     except (TypeError, ValueError):
         return "未知"
+
+
+def _normalize_current_weather(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize QWeather now/current fields to the legacy report structure."""
+    current = data.get("now") or data.get("current")
+    if not isinstance(current, dict):
+        return data
+
+    humidity = current.get("humidity")
+    try:
+        humidity = float(humidity)
+        if humidity > 1:
+            humidity /= 100
+    except (TypeError, ValueError):
+        pass
+
+    return {
+        "condition": {"text": current.get("text")},
+        "temperature": {"value": current.get("temp"), "unit": "°C"},
+        "feelsLike": {"value": current.get("feelsLike"), "unit": "°C"},
+        "humidity": humidity,
+        "wind": {
+            "direction": {"degree": current.get("wind360")},
+            "speed": {"value": current.get("windSpeed"), "unit": "km/h"},
+        },
+        "precipitation": {"amount": {"value": current.get("precip"), "unit": "mm"}},
+        "visibility": {"value": current.get("vis"), "unit": "km"},
+        "uvIndex": current.get("uvIndex") or current.get("uvi"),
+    }
 
 
 def _weather_report(location_name: str, weather: dict[str, Any]) -> str:
@@ -170,6 +201,7 @@ async def get_weather(conn: "ConnectionHandler", location: str = None, lang: str
             {"localTime": "true", "lang": _language(lang)},
         )
 
+    weather = _normalize_current_weather(weather) if weather else None
     if not weather or not weather.get("condition"):
         return ActionResponse(Action.REQLLM, None, "和风天气未返回有效的实时天气数据")
     report = _weather_report(location_name, weather)
