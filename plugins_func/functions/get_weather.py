@@ -170,6 +170,8 @@ async def get_weather(conn: "ConnectionHandler", location: str = None, lang: str
     api_key = weather_config.get("api_key", "a861d0d5e7bf4ee1a83d9a9e4f96d4da")
     default_location = weather_config.get("default_location", "广州")
     client_ip = conn.client_ip
+    requested_location = bool(location)
+    fixed_location = bool(weather_config.get("fixed_location", False))
 
     # 优先使用用户提供的location参数
     if not location:
@@ -192,6 +194,9 @@ async def get_weather(conn: "ConnectionHandler", location: str = None, lang: str
             # 若无IP，使用默认位置
             location = default_location
     # 尝试从缓存获取完整天气报告
+    if fixed_location and not requested_location:
+        location = default_location
+
     weather_cache_key = f"full_weather_{location}_{lang}"
     cached_weather_report = cache_manager.get(CacheType.WEATHER, weather_cache_key)
     if cached_weather_report:
