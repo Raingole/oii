@@ -36,7 +36,13 @@ command -v "${PYTHON_BIN}" >/dev/null 2>&1 || {
     exit 1
 }
 
-mkdir -p "${LOG_DIR}"
+mkdir -p "${LOG_DIR}" "${ROOT_DIR}/data/memory"
+
+if ! grep -q "Memory: server_longterm" "${ROOT_DIR}/config.yaml"; then
+    echo "[WARN] config.yaml 未启用 server_longterm，长期记忆可能不会保存" >&2
+fi
+
+echo "[INFO] 长期记忆数据库目录: ${ROOT_DIR}/data/memory"
 cd "${ROOT_DIR}"
 
 export MCP_BACKENDS="${MCP_BACKENDS:-restaurant=ws://127.0.0.1:8766/mcp/}"
