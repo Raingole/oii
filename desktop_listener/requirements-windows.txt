@@ -14,3 +14,4 @@ winrt-Windows.UI.ViewManagement
 winrt-Windows.UI.Popups
 winrt-Windows.UI.Notifications.Management
 requests>=2.32.0
+websockets>=14.0,<15.0
