@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b12" />
+    <title>oii · 语音使用指南</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-noise" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="oii 首页"><span>o</span>ii</a>
+      <nav class="nav-links" aria-label="主导航">
+        <a class="active" href="#top">首页</a>
+        <a href="#how-it-works">使用指南</a>
+        <a href="#examples">试试这样说</a>
+      </nav>
+      <a class="header-action" href="#how-it-works">开始使用 <span>↘</span></a>
+    </header>
+
+    <main id="top">
+      <section class="hero section-shell">
+        <div class="hero-copy">
+          <p class="eyebrow">你的语音助手</p>
+          <h1>让每一句话，<br /><em>都有回应</em></h1>
+          <p class="hero-subtitle">听见 · 理解 · 回应</p>
+          <button class="mic-button" id="micButton" type="button" aria-label="播放唤醒提示">
+            <span class="mic-ring"></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg>
+          </button>
+          <span class="mic-label" id="micLabel">你好 oii</span>
+        </div>
+        <div class="orb-stage" aria-hidden="true">
+          <div class="orb-glow"></div>
+          <div class="orb orb-one"></div>
+          <div class="orb orb-two"></div>
+          <div class="orb-core"></div>
+          <div class="wave wave-a"></div>
+          <div class="wave wave-b"></div>
+          <div class="wave wave-c"></div>
+          <div class="orb-stars"></div>
+        </div>
+      </section>
+
+      <section class="steps section-shell" id="how-it-works">
+        <article class="step">
+          <span class="step-number">1</span><div class="step-icon">⌁</div>
+          <div><h2>唤醒 oii</h2><p>说“你好 oii”<br />唤醒你的语音助手</p></div>
+        </article>
+        <div class="step-arrow">›</div>
+        <article class="step">
+          <span class="step-number">2</span><div class="step-icon">◌</div>
+          <div><h2>说出你的想法</h2><p>用自然的语言提问或表达需求，<br />oii 会认真听懂</p></div>
+        </article>
+        <div class="step-arrow">›</div>
+        <article class="step">
+          <span class="step-number purple">3</span><div class="step-icon purple-text">⌁</div>
+          <div><h2>oii 为你回应</h2><p>听见 · 理解 · 回应，<br />提供准确又贴心的帮助</p></div>
+        </article>
+      </section>
+
+      <section class="examples section-shell" id="examples">
+        <div class="section-title"><span class="title-wave">···</span><h2>试试这样说</h2><span class="title-wave purple-wave">···</span></div>
+        <div class="example-grid">
+          <button class="example-card" type="button" data-command="今天广州天气怎么样？"><span class="example-icon cyan">☁</span><span>“今天天气怎么样？”</span><small>天气查询</small><i></i></button>
+          <button class="example-card" type="button" data-command="明天早上八点叫我起床"><span class="example-icon blue">□</span><span>“明天早上 8 点叫我起床”</span><small>日程提醒</small><i></i></button>
+          <button class="example-card" type="button" data-command="播放周杰伦的歌"><span class="example-icon violet">♫</span><span>“播放周杰伦的歌”</span><small>音乐播放</small><i></i></button>
+          <button class="example-card" type="button" data-command="帮我写一份周报大纲"><span class="example-icon pink">◇</span><span>“帮我写一份周报大纲”</span><small>内容创作</small><i></i></button>
+          <button class="example-card" type="button" data-command="去公司怎么走最快？"><span class="example-icon cyan">⌖</span><span>“去公司怎么走最快？”</span><small>路线规划</small><i></i></button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer section-shell">
+      <a class="brand footer-brand" href="#top"><span>o</span>ii</a>
+      <p>用声音连接你我，让生活更简单。</p>
+      <div class="footer-links"><a href="#how-it-works">使用说明</a><a href="#examples">示例</a><a href="#top">回到顶部</a></div>
+      <small>© 2026 oii</small>
+    </footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

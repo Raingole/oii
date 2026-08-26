@@ -6,6 +6,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 LOG_DIR="${ROOT_DIR}/tmp/services"
 declare -a CHILD_PIDS=()
 MAIN_PID=""
+UI_PID=""
 
 cleanup() {
     local exit_code=$?
@@ -13,6 +14,10 @@ cleanup() {
 
     if [[ -n "${MAIN_PID}" ]] && kill -0 "${MAIN_PID}" 2>/dev/null; then
         kill "${MAIN_PID}" 2>/dev/null || true
+    fi
+
+    if [[ -n "${UI_PID}" ]] && kill -0 "${UI_PID}" 2>/dev/null; then
+        kill "${UI_PID}" 2>/dev/null || true
     fi
 
     for pid in "${CHILD_PIDS[@]:-}"; do
@@ -99,7 +104,30 @@ start_mcp() {
     fi
 }
 
+start_ui() {
+    local port="${UI_PORT:-8080}"
+    local log_file="${LOG_DIR}/ui.log"
+    [[ -f "${ROOT_DIR}/ui_server.py" ]] || {
+        echo "[ERROR] oii 前端服务不存在: ${ROOT_DIR}/ui_server.py" >&2
+        exit 1
+    }
+    if port_is_busy "${port}"; then
+        echo "[ERROR] oii 前端端口 ${port} 已被占用" >&2
+        exit 1
+    fi
+    echo "[INFO] 启动 oii 前端: http://0.0.0.0:${port}"
+    "${PYTHON_BIN}" "${ROOT_DIR}/ui_server.py" --host 0.0.0.0 --port "${port}" >"${log_file}" 2>&1 &
+    UI_PID=$!
+    CHILD_PIDS+=("${UI_PID}")
+    sleep 1
+    if ! kill -0 "${UI_PID}" 2>/dev/null; then
+        echo "[ERROR] oii 前端启动失败，日志: ${log_file}" >&2
+        exit 1
+    fi
+}
+
 # MCP 后端使用 8766，聚合器使用 8765（小智只连接聚合器）
+start_ui
 start_mcp "restaurant" "${ROOT_DIR}/mcp_restaurant_server/server.py" "8766"
 start_mcp "aggregator" "${ROOT_DIR}/mcp_aggregator/server.py" "8765"
 
