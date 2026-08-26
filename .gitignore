@@ -12,7 +12,8 @@ env/
 windows_notification_listener/bin/
 windows_notification_listener/obj/
 
-# 编译产物：含 1.6GB 自带 dotnet 运行时，仅保留本地，不入库
+# 编译产物：仅保留本地，不入库（源码在 windows_notification_listener/ 和 desktop_control_listener/）
 xiaozhi-notification-listener/
+xiaozhi-desktop-control/
 tmp/
 
