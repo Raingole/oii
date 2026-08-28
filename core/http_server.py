@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from collections import deque
 from aiohttp import web
@@ -86,6 +87,7 @@ class SimpleHttpServer:
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
+                        web.post("/api/notify", self.handle_notify),
                         web.get("/api/desktop", self.desktop_control.handle_websocket),
                         web.get("/api/desktop/", self.desktop_control.handle_websocket),
                         web.get("/ws/windows", self.notification_hub.handle_websocket),
@@ -134,6 +136,23 @@ class SimpleHttpServer:
                 self.logger.bind(tag=TAG).error(f"下发通知失败，已排队: {exc}")
                 return False
             return True
+
+    async def handle_notify(self, request):
+        """接受桌面监听器消息并转为设备 TTS。"""
+        if not self.websocket_server:
+            return web.json_response({"ok": False, "error": "WebSocket服务未初始化"}, status=503)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"ok": False, "error": "请求必须是JSON"}, status=400)
+
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            return web.json_response({"ok": False, "error": "缺少text"}, status=400)
+        delivered = await self.deliver_notification(text)
+        if not delivered:
+            return web.json_response({"ok": True, "queued": True}, status=202)
+        return web.json_response({"ok": True})
 
     async def deliver_pending_notifications(self, connection):
         """Deliver buffered desktop notifications after a board reconnects."""
