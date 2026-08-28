@@ -41,12 +41,6 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 
 async def startToChat(conn: "ConnectionHandler", text):
-    # 对话状态与 WebSocket 在线状态分离：未被唤醒时只保持连接，不能进入 ASR/LLM 对话。
-    # 唤醒词路径会在 ListenTextMessageHandler 中先将 conversation_active 设为 True。
-    if not getattr(conn, "conversation_active", False):
-        conn.logger.bind(tag=TAG).info("当前处于等待唤醒状态，忽略对话输入")
-        return
-
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     actual_text = text

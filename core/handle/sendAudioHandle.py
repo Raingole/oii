@@ -312,7 +312,6 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
         if getattr(conn, "reset_context_after_chat", False):
             conn.dialogue.clear_context()
             conn.reset_context_after_chat = False
-            conn.conversation_active = False
             conn.logger.bind(tag=TAG).info("当前对话已结束，保留 ESP WebSocket 连接")
 
     # 发送消息到客户端
