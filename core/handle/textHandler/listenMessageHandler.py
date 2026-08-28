@@ -11,6 +11,7 @@ from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
 from core.handle.sendAudioHandle import send_stt_message, send_tts_message
+from core.handle.intentHandler import speak_txt
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.utils.util import remove_punctuation_and_length
@@ -37,6 +38,10 @@ class ListenTextMessageHandler(TextMessageHandler):
             await conn.start_conversation()
             await conn.send_conversation_state("active")
             conn.reset_audio_states()
+            # 唤醒词由 ESP 本地识别；服务器只在收到 start 后确认已进入对话。
+            # 该确认不经过 ASR，也不会触发新的 ConversationSession。
+            conn.sentence_id = uuid.uuid4().hex
+            speak_txt(conn, "我在")
         elif msg_json["state"] == "stop":
             if conn.active_conversation is None:
                 return
