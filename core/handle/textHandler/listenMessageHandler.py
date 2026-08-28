@@ -98,6 +98,11 @@ class ListenTextMessageHandler(TextMessageHandler):
                 # 是否开启唤醒词回复
                 enable_greeting = conn.config.get("enable_greeting", True)
 
+                # 唤醒词是重新开始对话的唯一入口。结束对话后，忽略所有普通识别结果，
+                # 但不关闭 WebSocket，因此云端仍可通过 notify_text 播报消息。
+                if is_wakeup_words:
+                    conn.conversation_active = True
+
                 if is_wakeup_words and not enable_greeting:
                     # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
                     await send_stt_message(conn, original_text)
@@ -109,6 +114,11 @@ class ListenTextMessageHandler(TextMessageHandler):
                     enqueue_asr_report(conn, "嘿，你好呀", [])
                     await startToChat(conn, "嘿，你好呀")
                 else:
+                    if not conn.conversation_active:
+                        conn.logger.bind(tag=TAG).info(
+                            "当前未唤醒，忽略普通识别结果，保持 ESP 长连接"
+                        )
+                        return
                     conn.just_woken_up = True
                     # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
                     enqueue_asr_report(conn, original_text, [])
