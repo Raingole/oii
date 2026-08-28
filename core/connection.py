@@ -1876,6 +1876,12 @@ class ConnectionHandler:
         """检查连接超时"""
         try:
             while not self.stop_event.is_set():
+                # ESP 长连接模式：连接保活与语音录入解耦。
+                # 是否在监听由 ESP 唤醒词状态决定，不应因为没有语音输入而关闭 WS。
+                if self.config.get("keep_connection_alive", False):
+                    await asyncio.sleep(10)
+                    continue
+
                 last_activity_time = self.last_activity_time
                 if self.need_bind:
                     last_activity_time = self.first_activity_time
