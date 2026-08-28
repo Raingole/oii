@@ -62,6 +62,7 @@ class QQGateway:
         self.site = web.TCPSite(self.server, host, port)
         await self.site.start()
         self.logger.bind(tag=TAG).info(f"OneBot Gateway listening on {host}:{port}")
+        await self.agent.start()
         try:
             await self.stop_event.wait()
         finally:
