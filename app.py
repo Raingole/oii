@@ -77,7 +77,7 @@ async def main():
     ws_server.http_server = ota_server
     ws_server.desktop_control = ota_server.desktop_control
     ota_task = asyncio.create_task(ota_server.start())
-    qq_gateway = QQGateway(config, ws_server._llm)
+    qq_gateway = QQGateway(config, ws_server._llm, controller=ws_server)
     qq_task = asyncio.create_task(qq_gateway.start())
 
     read_config_from_api = config.get("read_config_from_api", False)

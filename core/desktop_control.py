@@ -73,3 +73,24 @@ class DesktopControl:
         if sent == 0:
             return {"ok": False, "error": "桌面插件连接已失效"}
         return {"ok": True, "target": target, "url": url}
+
+    async def close_all_programs(self) -> dict[str, Any]:
+        return await self._send_action("close_all")
+
+    async def shutdown(self) -> dict[str, Any]:
+        return await self._send_action("shutdown")
+
+    async def _send_action(self, action: str) -> dict[str, Any]:
+        if not self.clients:
+            return {"ok": False, "error": "没有在线的桌面插件"}
+        command = {"type": "desktop_command", "command_id": uuid.uuid4().hex, "action": action}
+        sent = 0
+        for websocket in list(self.clients):
+            try:
+                await websocket.send_json(command)
+                sent += 1
+            except Exception:
+                self.clients.discard(websocket)
+        if sent == 0:
+            return {"ok": False, "error": "桌面插件连接已失效"}
+        return {"ok": True, "action": action}

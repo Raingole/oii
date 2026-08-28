@@ -1,6 +1,7 @@
 """Open an approved desktop application or website through the companion app."""
 
 import json
+import os
 from urllib.parse import urlparse
 
 from plugins_func.register import Action, ActionResponse, ToolType, register_function

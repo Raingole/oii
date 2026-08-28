@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
+from ctypes import wintypes
 import difflib
 import json
 import os
 import re
 import sys
+import subprocess
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -20,6 +23,7 @@ import websockets
 from PIL import Image, ImageDraw
 
 TARGETS = {"notepad": "notepad.exe", "calculator": "calc.exe", "explorer": "explorer.exe", "settings": "ms-settings:"}
+WM_CLOSE = 0x0010
 
 
 def config_dir() -> Path:
@@ -110,6 +114,41 @@ def open_target(message: dict) -> None:
         raise ValueError("不支持的桌面目标")
 
 
+def close_all_programs() -> int:
+    """Ask visible user applications to close without killing system processes."""
+    if sys.platform != "win32":
+        raise RuntimeError("关闭程序功能仅支持 Windows")
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    own_pid = os.getpid()
+    protected = {"explorer.exe", "dwm.exe", "winlogon.exe", "csrss.exe", "services.exe", "lsass.exe"}
+    closed = 0
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd, _lparam):
+        nonlocal closed
+        if not user32.IsWindowVisible(hwnd) or not user32.IsWindowEnabled(hwnd):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == own_pid:
+            return True
+        image = ctypes.create_unicode_buffer(260)
+        process = kernel32.OpenProcess(0x1000, False, pid.value)
+        if process:
+            size = wintypes.DWORD(len(image))
+            kernel32.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(size))
+            kernel32.CloseHandle(process)
+        if image.value and os.path.basename(image.value).lower() in protected:
+            return True
+        if user32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
+            closed += 1
+        return True
+
+    user32.EnumWindows(enum_proc(callback), 0)
+    return closed
+
+
 async def command_loop(endpoint: str, token: str, stop: threading.Event, status) -> None:
     separator = "&" if "?" in endpoint else "?"
     url = f"{endpoint}{separator}token={quote(token, safe='')}"
@@ -125,7 +164,14 @@ async def command_loop(endpoint: str, token: str, stop: threading.Event, status)
                         continue
                     result, error = "ok", ""
                     try:
-                        open_target(message)
+                        if message.get("action") == "close_all":
+                            count = close_all_programs()
+                            status(f"已请求关闭 {count} 个程序")
+                        elif message.get("action") == "shutdown":
+                            subprocess.run(["shutdown", "/s", "/t", "0"], check=True)
+                            status("正在关机")
+                        else:
+                            open_target(message)
                         status(f"已执行：{message.get('target', '')}")
                     except Exception as exc:
                         result, error = "error", str(exc)

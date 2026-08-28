@@ -21,20 +21,21 @@ class QQConversation:
 class QQAgentContext:
     """Formal non-ESP context presented to existing Tool executors."""
 
-    def __init__(self, config: dict, llm: Any, logger, loop: asyncio.AbstractEventLoop):
+    def __init__(self, config: dict, llm: Any, logger, loop: asyncio.AbstractEventLoop, controller=None):
         self.config = config
         self.llm = llm
         self.logger = logger
         self.loop = loop
         self.websocket = None
         self.device_id = None
+        self.server = controller
         self.session_id = ""
         self.dialogue = Dialogue()
         self.func_handler = UnifiedToolHandler(self)
 
 
 class QQAgent:
-    def __init__(self, config: dict, llm: Any):
+    def __init__(self, config: dict, llm: Any, controller=None):
         self.config = config
         self.llm = llm
         self.logger = setup_logging(config)
@@ -42,11 +43,14 @@ class QQAgent:
         self.prompt = str(config.get("prompt", ""))
         self.context: QQAgentContext | None = None
         self.pipeline = AgentPipeline(config)
+        self.controller = controller
 
     async def start(self) -> None:
         if self.context is not None:
             return
-        self.context = QQAgentContext(self.config, self.llm, self.logger, asyncio.get_running_loop())
+        self.context = QQAgentContext(
+            self.config, self.llm, self.logger, asyncio.get_running_loop(), self.controller
+        )
         if self.prompt:
             self.context.dialogue.update_system_message(self.prompt)
         try:
@@ -72,4 +76,3 @@ class QQAgent:
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
             return await self.pipeline.process(self.context, text, session_key)
-

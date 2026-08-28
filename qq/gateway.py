@@ -18,7 +18,7 @@ TAG = __name__
 
 
 class QQGateway:
-    def __init__(self, config: dict, llm):
+    def __init__(self, config: dict, llm, controller=None):
         self.config = config
         self.qq_config = dict(config.get("qq", {}))
         # Environment variables override file configuration and keep production
@@ -34,7 +34,7 @@ class QQGateway:
                 self.qq_config[config_name] = os.environ[env_name]
         config["qq"] = self.qq_config
         self.logger = setup_logging(config)
-        self.agent = QQAgent(config, llm)
+        self.agent = QQAgent(config, llm, controller=controller)
         self.service = QQService(config)
         self.server: Optional[web.AppRunner] = None
         self.site: Optional[web.TCPSite] = None
