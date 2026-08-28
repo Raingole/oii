@@ -22,6 +22,9 @@ server:
   websocket: ws://36.212.7.43:8000/xiaozhi/v1/
   # 云端主动下发令牌；为空时使用 desktop_token，再为空时使用运行时 auth_key
   cloud_push_token: ""
+  # WebSocket 传输层心跳，0 表示关闭
+  websocket_ping_interval: 20
+  websocket_ping_timeout: 20
   # 视觉分析接口地址
   # 向设备发送的视觉分析的接口地址
   # 如果按下面默认的写法，系统会自动生成视觉识别地址，并输出在启动日志里，这个地址你可以直接用浏览器访问确认一下
