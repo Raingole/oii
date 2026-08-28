@@ -9,7 +9,6 @@ if TYPE_CHECKING:
 from core.utils.dialogue import Message
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
-from core.handle.helloHandle import is_similar_wakeup_word
 from core.handle.reportHandle import enqueue_asr_report
 from core.handle.sendAudioHandle import send_stt_message, send_tts_message
 from core.handle.textMessageHandler import TextMessageHandler
@@ -95,10 +94,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     return
 
                 # 识别是否是唤醒词
-                is_wakeup_words = (
-                    filtered_text in conn.config.get("wakeup_words", [])
-                    or is_similar_wakeup_word(filtered_text)
-                )
+                is_wakeup_words = filtered_text in conn.config.get("wakeup_words")
                 # 是否开启唤醒词回复
                 enable_greeting = conn.config.get("enable_greeting", True)
 
