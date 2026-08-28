@@ -98,7 +98,7 @@ class ServerPluginExecutor(ToolExecutor):
         # 获取必要的函数
         necessary_functions = [
             "handle_exit_intent", "get_lunar", "open_desktop_app",
-            "close_desktop", "shutdown_computer",
+            "close_desktop", "shutdown_computer", "qq.send_to_owner",
         ]
 
         # 获取配置中的函数

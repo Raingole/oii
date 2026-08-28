@@ -58,6 +58,7 @@ qq:
   onebot_ws_token: ""
   napcat_http_url: http://127.0.0.1:3000
   napcat_http_token: ""
+  owner_qq: "2496303940"
   napcat_http_timeout: 10
   private_message_enabled: true
   allowed_users: []

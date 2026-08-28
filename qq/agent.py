@@ -16,6 +16,7 @@ TAG = __name__
 class QQConversation:
     dialogue: Dialogue
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_tool_result: Any = None
 
 
 class QQAgentContext:
@@ -32,6 +33,7 @@ class QQAgentContext:
         self.session_id = ""
         self.dialogue = Dialogue()
         self.func_handler = UnifiedToolHandler(self)
+        self.last_tool_result = None
 
 
 class QQAgent:
@@ -75,4 +77,7 @@ class QQAgent:
         async with session.lock:
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
-            return await self.pipeline.process(self.context, text, session_key)
+            self.context.last_tool_result = session.last_tool_result
+            answer = await self.pipeline.process(self.context, text, session_key)
+            session.last_tool_result = self.context.last_tool_result
+            return answer

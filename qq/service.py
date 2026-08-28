@@ -13,6 +13,7 @@ TAG = __name__
 class QQService:
     def __init__(self, config: dict):
         qq_config = config.get("qq", {})
+        self.configured_owner_id = str(qq_config.get("owner_qq", "")).strip()
         self.base_url = str(qq_config.get("napcat_http_url", "http://127.0.0.1:3000")).rstrip("/")
         self.token = str(qq_config.get("napcat_http_token", ""))
         self.timeout = float(qq_config.get("napcat_http_timeout", 10))
@@ -31,6 +32,21 @@ class QQService:
 
     async def send_private_message(self, user_id: str, message: str) -> bool:
         return await self._call("send_private_msg", {"user_id": str(user_id), "message": message})
+
+    async def send_text_to_owner(self, message: str) -> dict[str, Any]:
+        """Send plain text to the configured owner without exposing a target to the model."""
+        owner_id = self.configured_owner_id
+        clean = _clean_message(message)
+        if not owner_id:
+            return {"success": False, "channel": "qq", "target": "owner", "error": "OWNER_QQ 未配置"}
+        if not clean:
+            return {"success": False, "channel": "qq", "target": "owner", "error": "消息内容为空"}
+        self.logger.bind(tag=TAG).info("[qq.service] sending private message to owner")
+        ok = await self.send_message({"message_type": "private", "user_id": owner_id}, clean)
+        if ok:
+            self.logger.bind(tag=TAG).info("[qq.service] message sent successfully")
+            return {"success": True, "channel": "qq", "target": "owner"}
+        return {"success": False, "channel": "qq", "target": "owner", "error": "NapCat 未确认消息发送成功"}
 
     async def send_group_message(self, group_id: str, message: str) -> bool:
         return await self._call("send_group_msg", {"group_id": str(group_id), "message": message})
@@ -80,4 +96,3 @@ def _clean_message(message: str) -> str:
     message = re.sub(r"<\/?think>|<tool_call>|</tool_call>", "", str(message or ""))
     message = re.sub(r"\x00", "", message)
     return message.strip()
-

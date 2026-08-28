@@ -35,7 +35,9 @@ class QQGateway:
         config["qq"] = self.qq_config
         self.logger = setup_logging(config)
         self.agent = QQAgent(config, llm, controller=controller)
-        self.service = QQService(config)
+        self.service = getattr(controller, "qq_service", None) or QQService(config)
+        if controller is not None:
+            controller.qq_service = self.service
         self.server: Optional[web.AppRunner] = None
         self.site: Optional[web.TCPSite] = None
         self.stop_event = asyncio.Event()

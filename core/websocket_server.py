@@ -46,6 +46,8 @@ class WebSocketServer:
         self.config_lock = asyncio.Lock()
         self.connections = {}
         self.http_server = None
+        # Shared output adapter used by server plugins such as qq.send_to_owner.
+        self.qq_service = None
         # Shared by server-side tools so desktop control does not depend on an
         # HTTP server back-reference being populated in a particular order.
         self.desktop_control = None

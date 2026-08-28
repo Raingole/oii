@@ -54,6 +54,7 @@ class MCPEndpointExecutor(ToolExecutor):
             ):
                 return ActionResponse(
                     action=Action[resultJson["action"]],
+                    result=resultJson,
                     response=resultJson.get("response", ""),
                 )
 

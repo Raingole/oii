@@ -148,6 +148,7 @@ class UnifiedToolHandler:
                     result = await self.tool_manager.execute_tool(
                         call["name"], call.get("arguments", {})
                     )
+                    self._remember_tool_result(call["name"], result)
                     responses.append(result)
                 return self._combine_responses(responses)
 
@@ -176,11 +177,24 @@ class UnifiedToolHandler:
 
             # 执行工具调用
             result = await self.tool_manager.execute_tool(function_name, arguments)
+            self._remember_tool_result(function_name, result)
             return result
 
         except Exception as e:
             self.logger.error(f"处理function call错误: {e}")
             return ActionResponse(action=Action.ERROR, response=str(e))
+
+    def _remember_tool_result(self, tool_name: str, result: ActionResponse) -> None:
+        """Keep the latest structured tool output for channel-neutral follow-ups."""
+        value = getattr(result, "result", None)
+        if value is None:
+            value = getattr(result, "response", None)
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, ValueError):
+                pass
+        self.conn.last_tool_result = value
 
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:
         """合并多个函数调用的响应"""

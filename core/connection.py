@@ -209,6 +209,8 @@ class ConnectionHandler:
 
         # 对话进行中收到的通知，追加到本轮回复末尾一起播报
         self.pending_notify_texts = deque(maxlen=10)
+        # Latest structured tool output for follow-up tools such as QQ sending.
+        self.last_tool_result = None
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
