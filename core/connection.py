@@ -207,8 +207,6 @@ class ConnectionHandler:
 
         # 对话进行中收到的通知，追加到本轮回复末尾一起播报
         self.pending_notify_texts = deque(maxlen=10)
-        # 结束对话后进入等待唤醒词状态；此状态不影响 WebSocket 和云端播报。
-        self.conversation_active = False
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
