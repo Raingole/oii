@@ -115,13 +115,8 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
     for cmd in cmd_exit:
         if text == cmd:
             conn.logger.bind(tag=TAG).info(f"识别到明确的退出命令: {text}")
-            # 结束当前对话，但不要关闭 ESP 长连接；云端仍需能够继续下发语音/指令。
-            conn.close_after_chat = False
-            conn.reset_context_after_chat = True
-            conn.client_abort = False
-            conn.sentence_id = str(uuid.uuid4().hex)
             await send_stt_message(conn, text)
-            speak_txt(conn, "好的，当前对话结束了。")
+            await conn.close()
             return True
     return False
 

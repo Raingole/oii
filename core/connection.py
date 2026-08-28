@@ -181,8 +181,6 @@ class ConnectionHandler:
 
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
-        # 结束当前对话后清空上下文，但保持 ESP WebSocket 在线，继续接收云端消息
-        self.reset_context_after_chat = False
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
