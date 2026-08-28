@@ -98,16 +98,6 @@ class ListenTextMessageHandler(TextMessageHandler):
                 # 是否开启唤醒词回复
                 enable_greeting = conn.config.get("enable_greeting", True)
 
-                if is_wakeup_words:
-                    conn.conversation_active = True
-                    await conn.send_conversation_state("active")
-
-                if not is_wakeup_words and not conn.conversation_active:
-                    conn.logger.bind(tag=TAG).info(
-                        "当前未唤醒，忽略普通识别结果，保持 ESP 长连接"
-                    )
-                    return
-
                 if is_wakeup_words and not enable_greeting:
                     # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
                     await send_stt_message(conn, original_text)

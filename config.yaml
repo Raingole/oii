@@ -19,9 +19,7 @@ server:
   # 当你使用docker部署或使用公网部署(使用ssl、域名)时，不一定准确
   # 所以如果你使用docker部署时，将websocket设置成局域网地址
   # 如果你使用公网部署时，将vwebsocket设置成公网地址
-  websocket: ws://36.212.7.43:8000/xiaozhi/v1/
-  # 云端主动下发接口令牌；为空时使用 desktop_token，再为空时使用运行时 auth_key
-  cloud_push_token: ""
+  websocket: ws://你的ip或者域名:端口号/xiaozhi/v1/
   # 视觉分析接口地址
   # 向设备发送的视觉分析的接口地址
   # 如果按下面默认的写法，系统会自动生成视觉识别地址，并输出在启动日志里，这个地址你可以直接用浏览器访问确认一下
@@ -61,10 +59,8 @@ log:
 
 # 使用完声音文件后删除文件(Delete the sound file when you are done using it)
 delete_audio: true
-# 没有语音输入多久后断开连接(秒)。长连接模式开启时此值不参与断线判断。
+# 没有语音输入多久后断开连接(秒)，默认2分钟，即120秒
 close_connection_no_voice_time: 120
-# ESP WebSocket 长连接模式；不影响唤醒词和录音状态。
-keep_connection_alive: true
 # TTS请求超时时间(秒)
 tts_timeout: 15
 # 工具调用超时时间(秒)
