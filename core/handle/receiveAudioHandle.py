@@ -41,6 +41,10 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 
 async def startToChat(conn: "ConnectionHandler", text):
+    if conn.active_conversation is None or not conn.active_conversation.active:
+        conn.logger.bind(tag=TAG).info("当前没有活动 ConversationSession，忽略对话输入")
+        return
+
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     actual_text = text

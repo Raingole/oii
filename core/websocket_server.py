@@ -75,6 +75,14 @@ class WebSocketServer:
 
     def register_connection(self, conn):
         if conn.device_id:
+            old = self.connections.get(conn.device_id)
+            if old is not None and old is not conn:
+                self.logger.bind(tag=TAG).warning(
+                    f"设备重复连接，关闭旧连接: {conn.device_id}"
+                )
+                old.stop_event.set()
+                if old.websocket:
+                    asyncio.create_task(old.close(old.websocket))
             self.connections[conn.device_id] = conn
             self.logger.bind(tag=TAG).info(f"设备已注册通知连接: {conn.device_id}")
             if self.http_server is not None:

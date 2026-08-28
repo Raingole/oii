@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import ContentType
-from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
@@ -85,10 +84,6 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     if await check_direct_exit(conn, filtered_text):
         return True
 
-    # 检查是否是唤醒词
-    if await checkWakeupWords(conn, filtered_text):
-        return True
-
     if conn.intent_type == "function_call":
         route_request = detect_route_request(text)
         if route_request and getattr(conn, "func_handler", None):
@@ -115,8 +110,11 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
     for cmd in cmd_exit:
         if text == cmd:
             conn.logger.bind(tag=TAG).info(f"识别到明确的退出命令: {text}")
+            conn.close_after_chat = False
+            conn.reset_context_after_chat = True
+            conn.client_abort = False
             await send_stt_message(conn, text)
-            await conn.close()
+            speak_txt(conn, "好的，当前对话结束了。")
             return True
     return False
 

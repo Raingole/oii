@@ -44,6 +44,8 @@ class ASRProviderBase(ABC):
         while not conn.stop_event.is_set():
             try:
                 message = conn.asr_audio_queue.get(timeout=1)
+                if conn.active_conversation is None or not conn.active_conversation.active:
+                    continue
                 future = asyncio.run_coroutine_threadsafe(
                     handleAudioMessage(conn, message),
                     conn.loop,
@@ -59,6 +61,8 @@ class ASRProviderBase(ABC):
 
     # 接收音频
     async def receive_audio(self, conn: "ConnectionHandler", pcm_frame, audio_have_voice):
+        if conn.active_conversation is None or not conn.active_conversation.active:
+            return
         if conn.client_listen_mode == "manual":
             # 手动模式：缓存音频用于ASR识别
             conn.asr_audio.append(pcm_frame)

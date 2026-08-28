@@ -1,5 +1,6 @@
 import asyncio
 import json
+import secrets
 from pathlib import Path
 from collections import deque
 from aiohttp import web
@@ -87,7 +88,7 @@ class SimpleHttpServer:
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
-                        web.post("/api/notify", self.handle_notify),
+                        web.post("/api/cloud/push", self.handle_cloud_push),
                         web.get("/api/desktop", self.desktop_control.handle_websocket),
                         web.get("/api/desktop/", self.desktop_control.handle_websocket),
                         web.get("/ws/windows", self.notification_hub.handle_websocket),
@@ -137,22 +138,59 @@ class SimpleHttpServer:
                 return False
             return True
 
-    async def handle_notify(self, request):
-        """接受桌面监听器消息并转为设备 TTS。"""
-        if not self.websocket_server:
-            return web.json_response({"ok": False, "error": "WebSocket服务未初始化"}, status=503)
+    def _cloud_token_valid(self, request: web.Request) -> bool:
+        server_config = self.config.get("server", {})
+        expected = str(
+            server_config.get("cloud_push_token")
+            or server_config.get("desktop_token")
+            or server_config.get("auth_key", "")
+        )
+        supplied = request.headers.get("X-Cloud-Token", "")
+        if not supplied:
+            authorization = request.headers.get("Authorization", "")
+            if authorization.startswith("Bearer "):
+                supplied = authorization[7:]
+        return bool(expected) and secrets.compare_digest(str(supplied), expected)
+
+    async def handle_cloud_push(self, request):
+        """云端主动下发 TTS 或设备指令；不依赖 ConversationSession。"""
+        if not self._cloud_token_valid(request):
+            return web.json_response({"ok": False, "error": "云端推送鉴权失败"}, status=401)
         try:
             payload = await request.json()
         except (json.JSONDecodeError, ValueError):
             return web.json_response({"ok": False, "error": "请求必须是JSON"}, status=400)
 
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return web.json_response({"ok": False, "error": "缺少text"}, status=400)
-        delivered = await self.deliver_notification(text)
-        if not delivered:
-            return web.json_response({"ok": True, "queued": True}, status=202)
-        return web.json_response({"ok": True})
+        message_type = str(payload.get("type", "speak")).strip().lower()
+        if message_type == "speak":
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                return web.json_response({"ok": False, "error": "缺少text"}, status=400)
+            delivered = await self.deliver_notification(text[:500])
+            return web.json_response({"ok": True, "queued": not delivered}, status=202 if not delivered else 200)
+
+        if message_type == "command":
+            command = str(payload.get("command", "")).strip()
+            if not command:
+                return web.json_response({"ok": False, "error": "缺少command"}, status=400)
+            device_id = str(payload.get("device_id", "")).strip()
+            connections = list(self.websocket_server.connections.values())
+            if device_id:
+                connections = [self.websocket_server.get_connection(device_id)]
+            connections = [connection for connection in connections if connection is not None]
+            if not connections:
+                return web.json_response({"ok": False, "error": "设备不在线"}, status=503)
+            message = {
+                "type": "device_command",
+                "command": command,
+                "params": payload.get("params", {}),
+                "request_id": str(payload.get("request_id", "")),
+            }
+            for connection in connections:
+                await connection.websocket.send(json.dumps(message, ensure_ascii=False))
+            return web.json_response({"ok": True, "sent": len(connections)})
+
+        return web.json_response({"ok": False, "error": "type必须是speak或command"}, status=400)
 
     async def deliver_pending_notifications(self, connection):
         """Deliver buffered desktop notifications after a board reconnects."""

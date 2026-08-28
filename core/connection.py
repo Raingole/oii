@@ -45,6 +45,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.conversation import ConversationSession
 
 
 TAG = __name__
@@ -181,6 +182,9 @@ class ConnectionHandler:
 
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
+        self.reset_context_after_chat = False
+        # DeviceConnection 长期存在；ConversationSession 只在一次唤醒期间存在。
+        self.active_conversation: ConversationSession | None = None
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
@@ -224,12 +228,10 @@ class ConnectionHandler:
                 f"{self.client_ip} conn - Headers: {self.headers}"
             )
 
+            self.websocket = ws
             self.device_id = self.headers.get("device-id", None)
             if self.server:
                 self.server.register_connection(self)
-
-            # 认证通过,继续处理
-            self.websocket = ws
 
             # 检查是否来自MQTT连接
             request_path = ws.request.path
@@ -375,6 +377,9 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
+            # 空闲连接不把音频交给 ASR，但仍保留 WebSocket 下行能力。
+            if self.active_conversation is None or not self.active_conversation.active:
+                return
             if self.vad is None or self.asr is None:
                 return
 
@@ -640,15 +645,8 @@ class ConnectionHandler:
             """初始化本地组件"""
             if self.vad is None:
                 self.vad = self._vad
-            if self.asr is None:
-                self.asr = self._initialize_asr()
-
             # 初始化声纹识别
             self._initialize_voiceprint()
-            # 打开语音识别通道
-            asyncio.run_coroutine_threadsafe(
-                self.asr.open_audio_channels(self), self.loop
-            )
 
             """加载记忆"""
             self._initialize_memory()
@@ -1661,6 +1659,8 @@ class ConnectionHandler:
             if self.stop_event:
                 self.stop_event.set()
 
+            await self.stop_conversation(reason="connection_close", notify_client=False)
+
             # 清空任务队列
             self.clear_queues()
 
@@ -1780,6 +1780,59 @@ class ConnectionHandler:
             self._destroy_context_after_playback(notify_sentence_id)
         )
 
+    async def start_conversation(self) -> ConversationSession:
+        """Create a per-wake conversation without creating a new WebSocket."""
+        if self.active_conversation and self.active_conversation.active:
+            return self.active_conversation
+        if self.vad is None:
+            self.vad = self._vad
+        if self.asr is None:
+            self.asr = await self.loop.run_in_executor(
+                self.executor, self._initialize_asr
+            )
+            await self.asr.open_audio_channels(self)
+        self.active_conversation = ConversationSession()
+        self.client_abort = False
+        self.close_after_chat = False
+        self.reset_audio_states()
+        self.logger.bind(tag=TAG).info(
+            f"ConversationSession 已创建: {self.active_conversation.conversation_id}"
+        )
+        return self.active_conversation
+
+    async def stop_conversation(self, reason="client_stop", notify_client=True):
+        """Stop current conversation input while retaining DeviceConnection."""
+        conversation = self.active_conversation
+        if conversation is None:
+            return
+        conversation.stop()
+        self.active_conversation = None
+        self.client_abort = True
+        self.reset_audio_states()
+        while True:
+            try:
+                self.asr_audio_queue.get_nowait()
+            except queue.Empty:
+                break
+        if notify_client and self.websocket and not self.stop_event.is_set():
+            await self.websocket.send(json.dumps({
+                "type": "conversation",
+                "state": "stop",
+                "conversation_id": conversation.conversation_id,
+                "reason": reason,
+            }))
+        self.logger.bind(tag=TAG).info(
+            f"ConversationSession 已销毁: {conversation.conversation_id}, reason={reason}"
+        )
+
+    async def send_conversation_state(self, state):
+        if not self.websocket or self.stop_event.is_set():
+            return
+        payload = {"type": "conversation", "state": state, "session_id": self.session_id}
+        if self.active_conversation:
+            payload["conversation_id"] = self.active_conversation.conversation_id
+        await self.websocket.send(json.dumps(payload))
+
     async def _destroy_context_after_playback(self, notify_sentence_id):
         """通知播报完成后销毁整个对话上下文；期间用户新开对话则跳过。"""
         try:
@@ -1876,6 +1929,9 @@ class ConnectionHandler:
         """检查连接超时"""
         try:
             while not self.stop_event.is_set():
+                if self.config.get("keep_connection_alive", False):
+                    await asyncio.sleep(10)
+                    continue
                 last_activity_time = self.last_activity_time
                 if self.need_bind:
                     last_activity_time = self.first_activity_time

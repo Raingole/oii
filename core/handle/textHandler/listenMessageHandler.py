@@ -34,8 +34,12 @@ class ListenTextMessageHandler(TextMessageHandler):
             )
         if msg_json["state"] == "start":
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
+            await conn.start_conversation()
+            await conn.send_conversation_state("active")
             conn.reset_audio_states()
         elif msg_json["state"] == "stop":
+            if conn.active_conversation is None:
+                return
             # 收到stop但asr未初始化，跳过处理
             if conn.asr is None:
                 return
@@ -53,6 +57,8 @@ class ListenTextMessageHandler(TextMessageHandler):
                     if len(asr_audio_task) > 0:
                         await conn.asr.handle_voice_stop(conn, asr_audio_task)
         elif msg_json["state"] == "detect":
+            if conn.active_conversation is None:
+                return
             conn.client_have_voice = False
             conn.reset_audio_states()
             if "text" in msg_json:
@@ -93,24 +99,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     conn.dialogue.put(Message(role="assistant", content=call_text))
                     return
 
-                # 识别是否是唤醒词
-                is_wakeup_words = filtered_text in conn.config.get("wakeup_words")
-                # 是否开启唤醒词回复
-                enable_greeting = conn.config.get("enable_greeting", True)
-
-                if is_wakeup_words and not enable_greeting:
-                    # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
-                    await send_stt_message(conn, original_text)
-                    await send_tts_message(conn, "stop", None)
-                    conn.client_is_speaking = False
-                elif is_wakeup_words:
-                    conn.just_woken_up = True
-                    # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
-                    enqueue_asr_report(conn, "嘿，你好呀", [])
-                    await startToChat(conn, "嘿，你好呀")
-                else:
-                    conn.just_woken_up = True
-                    # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
-                    enqueue_asr_report(conn, original_text, [])
-                    # 否则需要LLM对文字内容进行答复
-                    await startToChat(conn, original_text)
+                # 唤醒词由 ESP 本地检测；detect 到达这里时已经是用户实际语音。
+                conn.just_woken_up = True
+                enqueue_asr_report(conn, original_text, [])
+                await startToChat(conn, original_text)
