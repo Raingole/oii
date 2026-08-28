@@ -193,9 +193,14 @@ class TTSProvider(TTSProviderBase):
     async def text_to_speak(self, text, _):
         """发送文本到TTS服务进行合成"""
         try:
-            if self.ws is None:
-                logger.bind(tag=TAG).warning("WebSocket连接不存在，终止发送文本")
-                return
+            # The DashScope TTS socket is independent from the ESP device socket.
+            # Recreate the upstream task if its monitor cleared the socket between
+            # the FIRST marker and the first generated text chunk.
+            if self.ws is None or not self.activate_session:
+                logger.bind(tag=TAG).warning(
+                    "TTS上游WebSocket不存在或会话已结束，自动重建TTS会话"
+                )
+                await self.start_session(self.conn.sentence_id)
 
             # 过滤Markdown
             filtered_text = MarkdownCleaner.clean_markdown(text)
