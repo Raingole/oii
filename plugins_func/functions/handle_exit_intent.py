@@ -45,7 +45,6 @@ def handle_exit_intent(conn: "ConnectionHandler", say_goodbye: str | None = None
         # 只结束当前对话，不关闭 ESP 的长连接。
         conn.close_after_chat = False
         conn.reset_context_after_chat = True
-        conn.conversation_active = False
         logger.bind(tag=TAG).info(f"退出意图已处理:{say_goodbye}")
         return ActionResponse(
             action=Action.RESPONSE, result="退出意图已处理", response=say_goodbye
