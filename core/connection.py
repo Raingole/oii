@@ -181,6 +181,7 @@ class ConnectionHandler:
 
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
+        self.reset_context_after_chat = False
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
@@ -205,6 +206,8 @@ class ConnectionHandler:
 
         # 对话进行中收到的通知，追加到本轮回复末尾一起播报
         self.pending_notify_texts = deque(maxlen=10)
+        # 会话状态与 WebSocket 状态分离：连接在线不代表允许处理普通语音。
+        self.conversation_active = False
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
@@ -1780,6 +1783,16 @@ class ConnectionHandler:
             self._destroy_context_after_playback(notify_sentence_id)
         )
 
+    async def send_conversation_state(self, state):
+        """通知 ESP 会话状态，但不触发录音或关闭 WebSocket。"""
+        if not self.websocket or self.stop_event.is_set():
+            return
+        await self.websocket.send(json.dumps({
+            "type": "conversation",
+            "state": state,
+            "session_id": self.session_id,
+        }))
+
     async def _destroy_context_after_playback(self, notify_sentence_id):
         """通知播报完成后销毁整个对话上下文；期间用户新开对话则跳过。"""
         try:
@@ -1876,6 +1889,10 @@ class ConnectionHandler:
         """检查连接超时"""
         try:
             while not self.stop_event.is_set():
+                if self.config.get("keep_connection_alive", False):
+                    await asyncio.sleep(10)
+                    continue
+
                 last_activity_time = self.last_activity_time
                 if self.need_bind:
                     last_activity_time = self.first_activity_time

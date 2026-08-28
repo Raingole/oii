@@ -309,6 +309,12 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
         conn.clearSpeakStatus()
         # 兜底：本轮回复播完，把没赶上回复末尾的缓冲通知立即补播
         await conn.drain_pending_notifications()
+        if getattr(conn, "reset_context_after_chat", False):
+            conn.dialogue.clear_context()
+            conn.reset_context_after_chat = False
+            conn.conversation_active = False
+            await conn.send_conversation_state("idle")
+            conn.logger.bind(tag=TAG).info("当前对话已结束，保留 ESP WebSocket 连接")
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
