@@ -100,6 +100,9 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     if not is_configured_wakeup and not is_similar_wakeup_word(filtered_text):
         return False
 
+    session = await conn.start_conversation_after_wake()
+    if session is None:
+        return False
     conn.just_woken_up = True
     await send_tts_message(conn, "start")
 

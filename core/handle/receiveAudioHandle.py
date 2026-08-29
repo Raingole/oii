@@ -15,6 +15,12 @@ TAG = __name__
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
+    # Audio is connection-scoped, but it must only enter ASR for an active
+    # conversation. This also protects packets already queued during ENDING.
+    if getattr(conn.conversation_state, "name", "") != "ACTIVE":
+        conn.logger.bind(tag=TAG).debug("Ignore audio: conversation is not ACTIVE")
+        return
+
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, pcm_frame)
     # 如果设备刚刚被唤醒，短暂忽略VAD检测
@@ -41,6 +47,9 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 
 async def startToChat(conn: "ConnectionHandler", text):
+    if getattr(conn.conversation_state, "name", "") != "ACTIVE":
+        conn.logger.bind(tag=TAG).info("Ignore conversation input: conversation is not ACTIVE")
+        return
     if conn.active_conversation is None or not conn.active_conversation.active:
         conn.logger.bind(tag=TAG).info("当前没有活动 ConversationSession，忽略对话输入")
         return

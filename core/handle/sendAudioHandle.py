@@ -278,6 +278,7 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
 
 async def send_tts_message(conn: "ConnectionHandler", state, text=None):
     """发送 TTS 状态消息"""
+    end_after_tts = False
     if text is None and state == "sentence_start":
         return
     message = {"type": "tts", "state": state, "session_id": conn.session_id}
@@ -312,11 +313,14 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
         if getattr(conn, "reset_context_after_chat", False):
             conn.dialogue.clear_context()
             conn.reset_context_after_chat = False
-            await conn.stop_conversation(reason="conversation_end")
-            await conn.send_conversation_state("idle")
+            end_after_tts = True
 
     # 发送消息到客户端
-    await conn.websocket.send(json.dumps(message))
+    try:
+        await conn.websocket.send(json.dumps(message))
+    finally:
+        if end_after_tts:
+            await conn.end_conversation(reason="conversation_end", notify_state="end")
 
 
 async def send_stt_message(conn: "ConnectionHandler", text):

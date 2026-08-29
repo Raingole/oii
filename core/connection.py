@@ -45,7 +45,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
-from core.conversation import ConversationSession
+from core.conversation import ConversationSession, ConversationState
 
 
 TAG = __name__
@@ -106,6 +106,7 @@ class ConnectionHandler:
         self.read_config_from_api = self.config.get("read_config_from_api", False)
 
         self.websocket: websockets.ServerConnection | None = None
+        self.websocket_connected = False
         self.headers = None
         self.device_id = None
         self.client_ip = None
@@ -188,6 +189,12 @@ class ConnectionHandler:
         self.reset_context_after_chat = False
         # DeviceConnection 长期存在；ConversationSession 只在一次唤醒期间存在。
         self.active_conversation: ConversationSession | None = None
+        self.current_conversation_session: ConversationSession | None = None
+        self.conversation_state = ConversationState.WAIT_WAKE_WORD
+        self.conversation_active = False
+        self.waiting_for_wake_word = True
+        self.conversation_lock = asyncio.Lock()
+        self._conversation_end_finalizing = False
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
@@ -235,6 +242,7 @@ class ConnectionHandler:
             )
 
             self.websocket = ws
+            self.websocket_connected = True
             self.device_id = self.headers.get("device-id", None)
             if self.memory_manager:
                 self.user_id = self.memory_manager.resolve_owner("esp", str(self.device_id or ""))
@@ -386,6 +394,8 @@ class ConnectionHandler:
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
             # 空闲连接不把音频交给 ASR，但仍保留 WebSocket 下行能力。
+            if self.conversation_state != ConversationState.ACTIVE:
+                return
             if self.active_conversation is None or not self.active_conversation.active:
                 return
             if self.vad is None or self.asr is None:
@@ -1629,6 +1639,7 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            self.websocket_connected = False
             # 清理 VAD 连接资源
             if (
                     hasattr(self, "vad")
@@ -1805,49 +1816,92 @@ class ConnectionHandler:
             self._destroy_context_after_playback(notify_sentence_id)
         )
 
-    async def start_conversation(self) -> ConversationSession:
-        """Create a per-wake conversation without creating a new WebSocket."""
-        if self.active_conversation and self.active_conversation.active:
-            return self.active_conversation
-        if self.vad is None:
-            self.vad = self._vad
-        if self.asr is None:
-            self.asr = await self.loop.run_in_executor(
-                self.executor, self._initialize_asr
+    async def start_conversation_after_wake(self) -> ConversationSession | None:
+        """Create a session only after a validated local wake event."""
+        async with self.conversation_lock:
+            if self.conversation_state == ConversationState.ENDING:
+                self.logger.bind(tag=TAG).info("Ignore wake event while conversation is ending")
+                return None
+            if self.conversation_state == ConversationState.ACTIVE and self.active_conversation:
+                return self.active_conversation
+            if self.conversation_state != ConversationState.WAIT_WAKE_WORD:
+                return None
+
+            if self.vad is None:
+                self.vad = self._vad
+            if self.asr is None:
+                self.asr = await self.loop.run_in_executor(self.executor, self._initialize_asr)
+                await self.asr.open_audio_channels(self)
+
+            session = ConversationSession()
+            self.active_conversation = session
+            self.current_conversation_session = session
+            self._set_conversation_state(ConversationState.ACTIVE)
+            self.client_abort = False
+            self.close_after_chat = False
+            self.reset_audio_states()
+            self.logger.bind(tag=TAG).info(
+                f"ConversationSession created after wake word: {session.conversation_id}"
             )
-            await self.asr.open_audio_channels(self)
-        self.active_conversation = ConversationSession()
-        self.client_abort = False
-        self.close_after_chat = False
-        self.reset_audio_states()
-        self.logger.bind(tag=TAG).info(
-            f"ConversationSession 已创建: {self.active_conversation.conversation_id}"
-        )
-        return self.active_conversation
+            return session
 
     async def stop_conversation(self, reason="client_stop", notify_client=True):
-        """Stop current conversation input while retaining DeviceConnection."""
-        conversation = self.active_conversation
+        """Release conversation resources; WebSocket cleanup remains separate."""
+        await self.end_conversation(reason=reason, notify_client=notify_client, notify_state="stop")
+
+    async def _mark_conversation_ending(self):
+        async with self.conversation_lock:
+            if self.conversation_state != ConversationState.WAIT_WAKE_WORD:
+                self._set_conversation_state(ConversationState.ENDING)
+
+    def _set_conversation_state(self, state: ConversationState):
+        self.conversation_state = state
+        self.conversation_active = state == ConversationState.ACTIVE
+        self.waiting_for_wake_word = state == ConversationState.WAIT_WAKE_WORD
+
+    async def end_conversation(self, reason="conversation_end", notify_client=True, notify_state="end"):
+        """End one conversation and keep the owning ESP WebSocket alive."""
+        conversation = self.current_conversation_session or self.active_conversation
         if conversation is None:
+            self._set_conversation_state(ConversationState.WAIT_WAKE_WORD)
             return
-        conversation.stop()
-        self.active_conversation = None
+
+        async with self.conversation_lock:
+            if self._conversation_end_finalizing:
+                return
+            self._conversation_end_finalizing = True
+            if self.conversation_state != ConversationState.ENDING:
+                self._set_conversation_state(ConversationState.ENDING)
+
+        await conversation.stop_processing()
         self.client_abort = True
+        self.close_after_chat = False
         self.reset_audio_states()
         while True:
             try:
                 self.asr_audio_queue.get_nowait()
             except queue.Empty:
                 break
+
         if notify_client and self.websocket and not self.stop_event.is_set():
-            await self.websocket.send(json.dumps({
-                "type": "conversation",
-                "state": "stop",
-                "conversation_id": conversation.conversation_id,
-                "reason": reason,
-            }))
+            try:
+                await self.websocket.send(json.dumps({
+                    "type": "conversation",
+                    "state": notify_state,
+                    "session_id": self.session_id,
+                    "conversation_id": conversation.conversation_id,
+                    "reason": reason,
+                }))
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(f"Conversation end notify failed: {exc}")
+
+        await conversation.destroy(reason)
+        self.active_conversation = None
+        self.current_conversation_session = None
+        self._set_conversation_state(ConversationState.WAIT_WAKE_WORD)
+        self._conversation_end_finalizing = False
         self.logger.bind(tag=TAG).info(
-            f"ConversationSession 已销毁: {conversation.conversation_id}, reason={reason}"
+            f"ConversationSession destroyed: {conversation.conversation_id}, reason={reason}; WebSocket kept alive"
         )
 
     async def send_conversation_state(self, state):

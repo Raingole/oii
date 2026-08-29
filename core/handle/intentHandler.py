@@ -113,6 +113,7 @@ async def check_direct_exit(conn: "ConnectionHandler", text):
             conn.close_after_chat = False
             conn.reset_context_after_chat = True
             conn.client_abort = False
+            await conn._mark_conversation_ending()
             await send_stt_message(conn, text)
             speak_txt(conn, "好的，当前对话结束了。")
             return True

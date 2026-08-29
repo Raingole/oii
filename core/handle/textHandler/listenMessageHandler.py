@@ -28,25 +28,46 @@ class ListenTextMessageHandler(TextMessageHandler):
         return TextMessageType.LISTEN
 
     async def handle(self, conn: "ConnectionHandler", msg_json: Dict[str, Any]) -> None:
+        state = msg_json.get("state")
+        if state == "start":
+            if conn.conversation_state.name == "WAIT_WAKE_WORD":
+                conn.logger.bind(tag=TAG).info("Ignore listen/start: waiting for wake word")
+                return
+            if conn.conversation_state.name == "ENDING":
+                conn.logger.bind(tag=TAG).info("Ignore listen/start while conversation is ending")
+                return
+            if conn.active_conversation is None or not conn.active_conversation.active:
+                conn.logger.bind(tag=TAG).info("Ignore listen/start: no active conversation")
+                return
+            if "mode" in msg_json:
+                conn.client_listen_mode = msg_json["mode"]
+            conn.reset_audio_states()
+            await conn.send_conversation_state("active")
+            return
+        if state == "detect":
+            if conn.conversation_state.name == "ENDING":
+                conn.logger.bind(tag=TAG).info("Ignore wake event while conversation is ending")
+                return
+            if conn.conversation_state.name == "WAIT_WAKE_WORD":
+                session = await conn.start_conversation_after_wake()
+                if session is None:
+                    return
+                conn.sentence_id = uuid.uuid4().hex
+                conn.just_woken_up = True
+                speak_txt(conn, "我在")
+                conn.logger.bind(tag=TAG).info(
+                    f"Wake word accepted; ConversationSession active: {session.conversation_id}"
+                )
+                return
+        if state == "stop" and conn.conversation_state.name != "ACTIVE":
+            conn.logger.bind(tag=TAG).info("Ignore listen/stop: no active conversation")
+            return
         if "mode" in msg_json:
             conn.client_listen_mode = msg_json["mode"]
             conn.logger.bind(tag=TAG).debug(
                 f"客户端拾音模式：{conn.client_listen_mode}"
             )
-        if msg_json["state"] == "start":
-            # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
-            new_conversation = not (
-                conn.active_conversation and conn.active_conversation.active
-            )
-            await conn.start_conversation()
-            await conn.send_conversation_state("active")
-            conn.reset_audio_states()
-            # 唤醒词由 ESP 本地识别；服务器只在收到 start 后确认已进入对话。
-            # 该确认不经过 ASR，也不会触发新的 ConversationSession。
-            if new_conversation:
-                conn.sentence_id = uuid.uuid4().hex
-                speak_txt(conn, "我在")
-        elif msg_json["state"] == "stop":
+        if msg_json["state"] == "stop":
             if conn.active_conversation is None:
                 return
             # 收到stop但asr未初始化，跳过处理
