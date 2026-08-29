@@ -3,6 +3,10 @@
 The controller uses the official MemoryCore HTTP v2 API. The upstream source
 was inspected at commit `5299c00aaf65481703c180fd69df066d11254eb7`.
 
+The pinned upstream package references a missing optional `seed-v2` build
+directory. The vendored `build:scripts` command omits that optional helper;
+the MemoryCore Gateway itself is unaffected.
+
 ## Direct standalone install (no Docker)
 
 ```bash
