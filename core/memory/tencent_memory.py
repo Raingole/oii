@@ -46,7 +46,7 @@ class TencentMemoryAdapter(MemoryService):
         self.identity = MemoryIdentity(
             str(self.config.get("tencent_memory_team_id", "personal")),
             str(self.config.get("tencent_memory_agent_id", "central-controller")),
-            str(self.config.get("tencent_memory_user_id") or self.config.get("owner_id") or "yin2hao"),
+            str(self.config.get("tencent_memory_user_id") or self.config.get("owner_id") or "gu"),
         )
         self._client = requests.Session()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory-commit")

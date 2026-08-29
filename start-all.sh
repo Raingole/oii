@@ -7,6 +7,7 @@ LOG_DIR="${ROOT_DIR}/tmp/services"
 declare -a CHILD_PIDS=()
 MAIN_PID=""
 UI_PID=""
+MEMORY_PID=""
 
 cleanup() {
     local exit_code=$?
@@ -18,6 +19,10 @@ cleanup() {
 
     if [[ -n "${UI_PID}" ]] && kill -0 "${UI_PID}" 2>/dev/null; then
         kill "${UI_PID}" 2>/dev/null || true
+    fi
+
+    if [[ -n "${MEMORY_PID}" ]] && kill -0 "${MEMORY_PID}" 2>/dev/null; then
+        kill "${MEMORY_PID}" 2>/dev/null || true
     fi
 
     for pid in "${CHILD_PIDS[@]:-}"; do
@@ -43,6 +48,35 @@ command -v "${PYTHON_BIN}" >/dev/null 2>&1 || {
 
 mkdir -p "${LOG_DIR}" "${ROOT_DIR}/data/memory"
 
+start_memory_core() {
+    command -v node >/dev/null 2>&1 || {
+        echo "[ERROR] 未找到 Node.js，MemoryCore 要求 Node.js >= 22.16.0" >&2
+        exit 1
+    }
+    [[ -d "${ROOT_DIR}/TencentDB-Agent-Memory/MemoryCore/node_modules" ]] || {
+        echo "[ERROR] MemoryCore 尚未安装，请先运行 ./setup-and-start.sh" >&2
+        exit 1
+    }
+    local log_file="${LOG_DIR}/memory-core.log"
+    echo "[INFO] 启动 TencentDB MemoryCore"
+    "${PYTHON_BIN}" "${ROOT_DIR}/deploy/memory-core/start_memory_core.py" >"${log_file}" 2>&1 &
+    MEMORY_PID=$!
+    sleep 2
+    if ! kill -0 "${MEMORY_PID}" 2>/dev/null; then
+        echo "[ERROR] MemoryCore 启动失败，日志: ${log_file}" >&2
+        exit 1
+    fi
+    for _ in {1..20}; do
+        if curl -fsS http://127.0.0.1:8420/health >/dev/null 2>&1; then
+            echo "[OK] MemoryCore 健康检查通过"
+            return
+        fi
+        sleep 1
+    done
+    echo "[ERROR] MemoryCore 健康检查超时，日志: ${log_file}" >&2
+    exit 1
+}
+
 memory_config_ok=false
 if grep -Eq '^[[:space:]]*Memory:[[:space:]]*server_longterm[[:space:]]*$' "${ROOT_DIR}/config.yaml" \
     || grep -Eq '^[[:space:]]*Memory:[[:space:]]*server_longterm[[:space:]]*$' "${ROOT_DIR}/data/.config.yaml" 2>/dev/null; then
@@ -64,6 +98,8 @@ else
     exit 1
 fi
 cd "${ROOT_DIR}"
+
+start_memory_core
 
 export MCP_BACKENDS="${MCP_BACKENDS:-restaurant=ws://127.0.0.1:8766/mcp/}"
 

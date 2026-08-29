@@ -26,11 +26,14 @@ def main() -> int:
     endpoint = str(config.get("tencent_memory_base_url", "http://127.0.0.1:8420"))
     port = endpoint.rsplit(":", 1)[-1].rstrip("/") if ":" in endpoint else "8420"
     env = os.environ.copy()
+    data_dir = Path(str(config.get("tencent_memory_data_dir", ROOT / "data" / "memory" / "tencentdb")))
+    if not data_dir.is_absolute():
+        data_dir = ROOT / data_dir
     env.update({
         "TDAI_GATEWAY_CONFIG": str(UPSTREAM_CONFIG),
         "TDAI_GATEWAY_HOST": str(config.get("tencent_memory_host", "127.0.0.1")),
         "TDAI_GATEWAY_PORT": port,
-        "TDAI_DATA_DIR": str(ROOT / "data" / "memory" / "tencentdb"),
+        "TDAI_DATA_DIR": str(data_dir),
         "TDAI_LLM_API_KEY": str(llm.get("api_key", "")),
         "TDAI_LLM_BASE_URL": str(llm.get("base_url", "https://api.openai.com/v1")),
         "TDAI_LLM_MODEL": str(llm.get("model_name", "gpt-4o")),

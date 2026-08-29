@@ -14,7 +14,7 @@ class IdentityResolver:
         config = config or {}
         self.team_id = str(config.get("tencent_memory_team_id", "personal"))
         self.agent_id = str(config.get("tencent_memory_agent_id", "central-controller"))
-        self.user_id = str(config.get("tencent_memory_user_id") or config.get("owner_id") or "yin2hao")
+        self.user_id = str(config.get("tencent_memory_user_id") or config.get("owner_id") or "gu")
 
     def resolve(self, channel: str = "", external_id: str = "") -> MemoryIdentity:
         # Channel/external_id are intentionally audit metadata only. They must
