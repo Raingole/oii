@@ -41,6 +41,11 @@ def main() -> int:
     gateway_key = str(config.get("tencent_memory_api_key", ""))
     if gateway_key:
         env["TDAI_GATEWAY_API_KEY"] = gateway_key
+    else:
+        # Do not accidentally enable MemoryCore auth from a stale shell or
+        # systemd environment when the controller config intentionally leaves
+        # tencent_memory_api_key empty for loopback standalone mode.
+        env.pop("TDAI_GATEWAY_API_KEY", None)
     print(f"[Memory] Starting pinned MemoryCore from {MEMORY_CORE}", flush=True)
     print(f"[Memory] Config source: {CONTROLLER_CONFIG}", flush=True)
     print(f"[Memory] Data directory: {env['TDAI_DATA_DIR']}", flush=True)
