@@ -43,6 +43,16 @@ class ListenTextMessageHandler(TextMessageHandler):
             )
             await conn.send_listen_ready(turn.turn_id)
             await conn.send_conversation_state("active")
+            # The wake word is detected locally by the ESP.  Queue the
+            # acknowledgement only after the formal turn has been created;
+            # start_turn() clears the previous turn's queues and would
+            # otherwise race with an immediately queued "我在" response.
+            if getattr(conn, "wake_ack_pending", False):
+                conn.wake_ack_pending = False
+                speak_txt(conn, "我在")
+                conn.logger.bind(tag=TAG).info(
+                    f"[session={conn.session_id} turn={turn.turn_id}] wake acknowledgement queued"
+                )
             return
         if state == "detect":
             if conn.conversation_state.name == "ENDING":
@@ -54,9 +64,9 @@ class ListenTextMessageHandler(TextMessageHandler):
                     return
                 conn.sentence_id = uuid.uuid4().hex
                 conn.just_woken_up = True
-                speak_txt(conn, "我在")
+                conn.wake_ack_pending = True
                 conn.logger.bind(tag=TAG).info(
-                    f"Wake word accepted; ConversationSession active: {session.conversation_id}"
+                    f"Wake word accepted; ConversationSession active: {session.conversation_id}; acknowledgement pending"
                 )
                 return
         if state == "stop" and conn.conversation_state.name != "ACTIVE":

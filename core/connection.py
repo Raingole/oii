@@ -237,6 +237,7 @@ class ConnectionHandler:
         # Latest structured tool output for follow-up tools such as QQ sending.
         self.last_tool_result = None
         self.current_user_query = ""
+        self.wake_ack_pending = False
 
     async def start_turn(self, client_event_id: str = "", sample_rate=None):
         """Start or replay an idempotent input turn without closing the socket."""
