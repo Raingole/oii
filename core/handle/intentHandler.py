@@ -38,24 +38,34 @@ def detect_air_conditioner_request(text: str):
     if re.search(r"(?:最后|上次|上一个).{0,5}(?:空调|指令)|(?:空调|指令).{0,5}(?:最后|上次|上一个)", normalized):
         return AIR_CONDITIONER_GET_LAST_COMMAND, {}
 
-    if not re.search(r"(?:设置|调到|调成|调为|改到|改成|设为|设到|温度)", normalized):
-        return None
-
     match = re.search(r"(\d{1,2})\s*(?:度|℃)?", normalized)
-    if match:
-        return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": int(match.group(1))}
-
     chinese_temperatures = {
         "十六": 16, "十七": 17, "十八": 18, "十九": 19,
         "二十": 20, "二十一": 21, "二十二": 22, "二十三": 23,
         "二十四": 24, "二十五": 25, "二十六": 26, "二十七": 27,
         "二十八": 28, "二十九": 29, "三十": 30,
     }
-    for phrase, temperature in sorted(
-        chinese_temperatures.items(), key=lambda item: len(item[0]), reverse=True
-    ):
-        if phrase in normalized:
-            return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": temperature}
+
+    # “空调25度”是常见的省略式设温请求，即使没有出现“设置/调到”也应直调。
+    if match and ("度" in normalized or "℃" in normalized):
+        return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": int(match.group(1))}
+
+    if "度" in normalized or "℃" in normalized:
+        for phrase, temperature in sorted(
+            chinese_temperatures.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            if phrase in normalized:
+                return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": temperature}
+
+    if re.search(r"(?:设置|调到|调成|调为|改到|改成|设为|设到|温度)", normalized):
+        for phrase, temperature in sorted(
+            chinese_temperatures.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            if phrase in normalized:
+                return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": temperature}
+
+        if match:
+            return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": int(match.group(1))}
 
     if re.search(r"(?:设置|调到|调成|调为|改到|改成|设为|设到)\s*(?:多少|几度)?$", normalized):
         return AIR_CONDITIONER_SET_TEMPERATURE, None
