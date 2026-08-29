@@ -30,10 +30,14 @@ class QQAgentContext:
         self.websocket = None
         self.device_id = None
         self.server = controller
+        self.memory_manager = getattr(controller, "memory_manager", None)
+        self.user_id = self.memory_manager.resolve_owner("qq") if self.memory_manager else "owner"
+        self.channel = "qq"
         self.session_id = ""
         self.dialogue = Dialogue()
         self.func_handler = UnifiedToolHandler(self)
         self.last_tool_result = None
+        self.current_user_query = ""
 
 
 class QQAgent:
@@ -77,6 +81,9 @@ class QQAgent:
         async with session.lock:
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
+            external_id = session_key.rsplit(":", 1)[-1] if session_key else ""
+            if self.context.memory_manager:
+                self.context.user_id = self.context.memory_manager.resolve_owner("qq", external_id)
             self.context.last_tool_result = session.last_tool_result
             answer = await self.pipeline.process(self.context, text, session_key)
             session.last_tool_result = self.context.last_tool_result

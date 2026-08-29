@@ -17,6 +17,12 @@ class AgentPipeline:
         self.logger = setup_logging(config)
 
     async def process(self, context: Any, query: str, session_id: str) -> str:
+        memory_manager = getattr(context, "memory_manager", None)
+        channel = getattr(context, "channel", "")
+        user_id = getattr(context, "user_id", "owner")
+        if memory_manager is not None:
+            memory_manager.observe_text(query, channel, session_id)
+        context.current_user_query = query
         context.dialogue.put(Message(role="user", content=query))
         try:
             answer = await self._turn(context, session_id, int(self.config.get("tool_call_max_depth", 5)))
@@ -27,12 +33,33 @@ class AgentPipeline:
         answer = answer.strip()
         if answer:
             context.dialogue.put(Message(role="assistant", content=answer))
+            if memory_manager is not None:
+                memory_manager.record_turn(
+                    query,
+                    answer,
+                    channel,
+                    session_id,
+                    getattr(context, "last_tool_result", None),
+                )
             return answer
         return "抱歉，我没有生成有效回复。"
 
     async def _turn(self, context: Any, session_id: str, remaining: int) -> str:
         functions = self._get_functions(context)
         dialogue = context.dialogue.get_llm_dialogue()
+        memory_manager = getattr(context, "memory_manager", None)
+        if memory_manager is not None:
+            memory_prompt = memory_manager.retrieve_prompt(
+                getattr(context, "user_id", "owner"),
+                getattr(context, "channel", ""),
+                session_id,
+                getattr(context, "current_user_query", ""),
+            )
+            if memory_prompt:
+                if dialogue and isinstance(dialogue[0], dict) and dialogue[0].get("role") == "system":
+                    dialogue[0]["content"] = f"{dialogue[0].get('content', '')}\n\n{memory_prompt}"
+                else:
+                    dialogue = [{"role": "system", "content": memory_prompt}] + dialogue
         if functions:
             text, calls = await asyncio.to_thread(
                 self._collect_function_response, context.llm, session_id, dialogue, functions

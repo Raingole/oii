@@ -75,6 +75,9 @@ async def startToChat(conn: "ConnectionHandler", text):
     else:
         conn.current_speaker = None
 
+    if getattr(conn, "memory_manager", None):
+        conn.memory_manager.observe_text(actual_text, conn.channel, conn.session_id)
+
     if conn.need_bind:
         await check_bind_device(conn)
         return

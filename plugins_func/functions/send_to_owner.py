@@ -45,7 +45,6 @@ def _parse(value: Any) -> Any:
 def _is_reference(text: str) -> bool:
     return any(word in text for word in ("这个", "刚才", "上一条", "上述", "它", "地址", "结果"))
 
-
 def _format_artifact(value: Any, address_only: bool = False) -> str:
     value = _parse(value)
     if isinstance(value, dict):
@@ -68,6 +67,19 @@ def _format_artifact(value: Any, address_only: bool = False) -> str:
                 lines.append(f"评分：{rating}")
             if lines:
                 return "\n".join(lines)
+        if any(value.get(key) for key in ("name", "address", "distance", "distance_m")):
+            lines = []
+            if address_only and value.get("address"):
+                return f"地址：{value['address']}"
+            if value.get("name"):
+                lines.append(str(value["name"]))
+            if value.get("address"):
+                lines.append(f"地址：{value['address']}")
+            distance = value.get("distance_m") or value.get("distance")
+            if distance:
+                lines.append(f"距离：{distance}米")
+            if lines:
+                return "\n".join(lines)
         for key in ("response", "content", "text", "result"):
             if value.get(key):
                 nested = _format_artifact(value[key], address_only=address_only)
@@ -87,6 +99,10 @@ async def send_to_owner(conn, message: str) -> ActionResponse:
 
     if _is_reference(requested):
         artifact = getattr(conn, "last_tool_result", None)
+        if not artifact:
+            manager = getattr(getattr(conn, "server", None), "memory_manager", None)
+            recent = manager.get_recent_artifact() if manager is not None else None
+            artifact = recent.get("data") if recent else None
         if artifact:
             requested = _format_artifact(
                 artifact,

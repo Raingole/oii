@@ -145,8 +145,14 @@ class UnifiedToolHandler:
             if "function_calls" in function_call_data:
                 responses = []
                 for call in function_call_data["function_calls"]:
+                    memory_manager = getattr(self.conn, "memory_manager", None)
+                    arguments = call.get("arguments", {})
+                    if memory_manager is not None:
+                        arguments = memory_manager.apply_defaults(
+                            call["name"], arguments, getattr(self.conn, "current_user_query", "")
+                        )
                     result = await self.tool_manager.execute_tool(
-                        call["name"], call.get("arguments", {})
+                        call["name"], arguments
                     )
                     self._remember_tool_result(call["name"], result)
                     responses.append(result)
@@ -176,6 +182,11 @@ class UnifiedToolHandler:
                 self.logger.warning(f"发送工具调用显示消息失败: {e}")
 
             # 执行工具调用
+            memory_manager = getattr(self.conn, "memory_manager", None)
+            if memory_manager is not None:
+                arguments = memory_manager.apply_defaults(
+                    function_name, arguments, getattr(self.conn, "current_user_query", "")
+                )
             result = await self.tool_manager.execute_tool(function_name, arguments)
             self._remember_tool_result(function_name, result)
             return result
@@ -195,6 +206,14 @@ class UnifiedToolHandler:
             except (TypeError, ValueError):
                 pass
         self.conn.last_tool_result = value
+        memory_manager = getattr(self.conn, "memory_manager", None)
+        if memory_manager is not None:
+            memory_manager.record_tool_result(
+                tool_name,
+                value,
+                getattr(self.conn, "channel", ""),
+                getattr(self.conn, "session_id", ""),
+            )
 
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:
         """合并多个函数调用的响应"""

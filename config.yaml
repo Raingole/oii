@@ -303,6 +303,7 @@ end_prompt:
     请只回复一句不超过15个汉字的结束语，不要使用任何标点符号，不要换行，不要解释
 
 # 具体处理时选择的模块(The module selected for specific processing)
+owner_id: owner
 selected_module:
   # 语音活动检测模块，默认使用SileroVAD模型
   VAD: SileroVAD

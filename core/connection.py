@@ -93,6 +93,9 @@ class ConnectionHandler:
         self.session_id = str(uuid.uuid4())
         self.logger = setup_logging()
         self.server = server  # 保存server实例的引用
+        self.memory_manager = getattr(server, "memory_manager", None)
+        self.user_id = self.memory_manager.resolve_owner("esp") if self.memory_manager else "owner"
+        self.channel = "esp"
 
         self.need_bind = False  # 是否需要绑定设备
         self.bind_completed_event = asyncio.Event()
@@ -211,6 +214,7 @@ class ConnectionHandler:
         self.pending_notify_texts = deque(maxlen=10)
         # Latest structured tool output for follow-up tools such as QQ sending.
         self.last_tool_result = None
+        self.current_user_query = ""
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
@@ -232,6 +236,8 @@ class ConnectionHandler:
 
             self.websocket = ws
             self.device_id = self.headers.get("device-id", None)
+            if self.memory_manager:
+                self.user_id = self.memory_manager.resolve_owner("esp", str(self.device_id or ""))
             if self.server:
                 self.server.register_connection(self)
 
@@ -969,6 +975,8 @@ class ConnectionHandler:
             return
         """初始化记忆模块"""
         self.memory.init_memory(
+            # Keep the legacy provider's compatibility history device-scoped;
+            # unified cross-channel memory is handled by MemoryManager(owner).
             role_id=self.device_id,
             llm=self.llm,
             summary_memory=self.config.get("summaryMemory", None),
@@ -1063,6 +1071,9 @@ class ConnectionHandler:
     def chat(self, query, depth=0):
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        query_text = query.get("content", "") if isinstance(query, dict) else str(query or "")
+        if depth == 0:
+            self.current_user_query = query_text
 
         if query is not None:
             self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
@@ -1126,7 +1137,11 @@ class ConnectionHandler:
             # 使用带记忆的对话
             memory_str = None
             # 仅当query非空（代表用户询问）时查询记忆
-            if self.memory is not None and query:
+            if self.memory_manager is not None and query_text:
+                memory_str = self.memory_manager.retrieve_prompt(
+                    self.user_id, self.channel, self.session_id, query_text
+                )
+            elif self.memory is not None and query:
                 future = asyncio.run_coroutine_threadsafe(
                     self.memory.query_memory(query), self.loop
                 )
@@ -1420,6 +1435,14 @@ class ConnectionHandler:
                     self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
                 )
             )
+            if self.memory_manager is not None:
+                self.memory_manager.record_turn(
+                    query_text,
+                    "".join(response_message),
+                    self.channel,
+                    self.session_id,
+                    self.last_tool_result,
+                )
 
         return True
 
