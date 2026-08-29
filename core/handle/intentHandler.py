@@ -12,10 +12,104 @@ from core.providers.tts.dto.dto import ContentType
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
-from core.utils.util import remove_punctuation_and_length
+from core.utils.util import remove_punctuation_and_length, sanitize_tool_name
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
 TAG = __name__
+
+AIR_CONDITIONER_SET_TEMPERATURE = sanitize_tool_name(
+    "self.air_conditioner.set_temperature"
+)
+AIR_CONDITIONER_POWER_OFF = sanitize_tool_name("self.air_conditioner.power_off")
+AIR_CONDITIONER_GET_LAST_COMMAND = sanitize_tool_name(
+    "self.air_conditioner.get_last_command"
+)
+
+
+def detect_air_conditioner_request(text: str):
+    """Return a safe direct MCP call for explicit air-conditioner requests."""
+    normalized = re.sub(r"[，。！？、,.!?]", "", text).strip()
+    if "空调" not in normalized:
+        return None
+
+    if re.search(r"(?:关闭|关掉|关上|关了|停止|停掉).{0,4}空调|空调.{0,4}(?:关闭|关掉|关上|停止|停掉)", normalized):
+        return AIR_CONDITIONER_POWER_OFF, {}
+
+    if re.search(r"(?:最后|上次|上一个).{0,5}(?:空调|指令)|(?:空调|指令).{0,5}(?:最后|上次|上一个)", normalized):
+        return AIR_CONDITIONER_GET_LAST_COMMAND, {}
+
+    if not re.search(r"(?:设置|调到|调成|调为|改到|改成|设为|设到|温度)", normalized):
+        return None
+
+    match = re.search(r"(\d{1,2})\s*(?:度|℃)?", normalized)
+    if match:
+        return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": int(match.group(1))}
+
+    chinese_temperatures = {
+        "十六": 16, "十七": 17, "十八": 18, "十九": 19,
+        "二十": 20, "二十一": 21, "二十二": 22, "二十三": 23,
+        "二十四": 24, "二十五": 25, "二十六": 26, "二十七": 27,
+        "二十八": 28, "二十九": 29, "三十": 30,
+    }
+    for phrase, temperature in sorted(
+        chinese_temperatures.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if phrase in normalized:
+            return AIR_CONDITIONER_SET_TEMPERATURE, {"temperature": temperature}
+
+    if re.search(r"(?:设置|调到|调成|调为|改到|改成|设为|设到)\s*(?:多少|几度)?$", normalized):
+        return AIR_CONDITIONER_SET_TEMPERATURE, None
+    return None
+
+
+async def execute_air_conditioner_directly(conn, text: str, tool_name: str, arguments):
+    """Execute an explicit air-conditioner request without relying on LLM tool choice."""
+    if not conn.func_handler.has_tool(tool_name):
+        conn.logger.bind(tag=TAG).warning(f"空调工具未注册，无法执行: {tool_name}")
+        await send_stt_message(conn, text)
+        conn.client_abort = False
+        speak_txt(conn, "当前设备未提供对应的空调控制接口。")
+        return True
+
+    if arguments is None:
+        await send_stt_message(conn, text)
+        conn.client_abort = False
+        speak_txt(conn, "可以，请告诉我目标温度，支持16到30度的制冷设定。")
+        return True
+
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    enqueue_tool_report(conn, tool_name, arguments)
+    function_call_data = {
+        "name": tool_name,
+        "id": str(uuid.uuid4().hex),
+        "arguments": json.dumps(arguments, ensure_ascii=False),
+    }
+
+    def process_function_call():
+        conn.dialogue.put(Message(role="user", content=text))
+        try:
+            result = asyncio.run_coroutine_threadsafe(
+                conn.func_handler.handle_llm_function_call(conn, function_call_data),
+                conn.loop,
+            ).result(timeout=int(conn.config.get("tool_call_timeout", 30)))
+            if not result:
+                speak_txt(conn, "空调指令执行失败，请稍后再试。")
+            elif result.action in {Action.ERROR, Action.NOTFOUND}:
+                speak_txt(conn, result.response or result.result or "空调指令执行失败，请稍后再试。")
+            elif tool_name == AIR_CONDITIONER_SET_TEMPERATURE:
+                speak_txt(conn, f"红外指令已发送，已为你设置制冷{arguments['temperature']}度。")
+            elif tool_name == AIR_CONDITIONER_POWER_OFF:
+                speak_txt(conn, "空调关机红外指令已发送。")
+            else:
+                result_text = result.result or result.response or "未能获取最后一次空调指令。"
+                speak_txt(conn, result_text)
+        except Exception as exc:
+            conn.logger.bind(tag=TAG).error(f"空调MCP直调用失败: {exc}")
+            speak_txt(conn, "空调红外指令未成功发送，请检查设备连接。")
+
+    conn.executor.submit(process_function_call)
+    return True
 
 
 def detect_meal_request(text: str):
@@ -83,6 +177,17 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     _, filtered_text = remove_punctuation_and_length(text)
     if await check_direct_exit(conn, filtered_text):
         return True
+
+    # 空调属于有实际副作用的设备控制：明确请求时直接调用设备 MCP，
+    # 避免模型选择普通文本回复而跳过红外下发。
+    if getattr(conn, "func_handler", None):
+        air_request = detect_air_conditioner_request(text)
+        if air_request:
+            tool_name, arguments = air_request
+            if await execute_air_conditioner_directly(
+                conn, text, tool_name, arguments
+            ):
+                return True
 
     if conn.intent_type == "function_call":
         route_request = detect_route_request(text)
