@@ -7,11 +7,11 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 
 from core.utils.dialogue import Message
+from core.utils.util import audio_to_data
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
-from core.handle.sendAudioHandle import send_stt_message, send_tts_message
-from core.handle.intentHandler import speak_txt
+from core.handle.sendAudioHandle import sendAudioMessage, send_stt_message, send_tts_message
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.utils.util import remove_punctuation_and_length
@@ -19,6 +19,29 @@ from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 
 
 TAG = __name__
+
+
+async def _send_wake_ack(conn: "ConnectionHandler", turn_id: int, sentence_id: str):
+    """Send the wake acknowledgement from a local file, independent of cloud TTS."""
+    if not conn.is_current_turn(turn_id) or conn.sentence_id != sentence_id:
+        return
+    try:
+        opus_packets = await audio_to_data(
+            "config/assets/wakeup_words_short.wav", use_cache=True
+        )
+        if not opus_packets or not conn.is_current_turn(turn_id):
+            return
+        await sendAudioMessage(conn, SentenceType.FIRST, opus_packets, "我在", sentence_id)
+        await sendAudioMessage(conn, SentenceType.LAST, [], None, sentence_id)
+        conn.logger.bind(tag=TAG).info(
+            f"[session={conn.session_id} turn={turn_id}] wake acknowledgement sent"
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).warning(
+            f"[session={conn.session_id} turn={turn_id}] wake acknowledgement failed: {exc}"
+        )
 
 class ListenTextMessageHandler(TextMessageHandler):
     """Listen消息处理器"""
@@ -49,7 +72,11 @@ class ListenTextMessageHandler(TextMessageHandler):
             # otherwise race with an immediately queued "我在" response.
             if getattr(conn, "wake_ack_pending", False):
                 conn.wake_ack_pending = False
-                speak_txt(conn, "我在")
+                conn.sentence_turn_ids[conn.sentence_id] = turn.turn_id
+                ack_task = asyncio.create_task(
+                    _send_wake_ack(conn, turn.turn_id, conn.sentence_id)
+                )
+                turn.track(ack_task, "tts")
                 conn.logger.bind(tag=TAG).info(
                     f"[session={conn.session_id} turn={turn.turn_id}] wake acknowledgement queued"
                 )
