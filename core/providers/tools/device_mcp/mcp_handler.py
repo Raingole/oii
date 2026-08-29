@@ -188,7 +188,10 @@ async def handle_mcp_message(
                         "inputSchema": input_schema,
                     }
                     await mcp_client.add_tool(new_tool)
-                    logger.bind(tag=TAG).debug(f"客户端工具 #{i+1}: {name}")
+                    sanitized_name = sanitize_tool_name(name)
+                    logger.bind(tag=TAG).info(
+                        f"客户端MCP工具注册: original={name}, sanitized={sanitized_name}"
+                    )
 
                 # 替换所有工具描述中的工具名称
                 for tool_data in mcp_client.tools.values():
@@ -210,7 +213,9 @@ async def handle_mcp_message(
                     await send_mcp_tools_list_continue_request(conn, next_cursor)
                 else:
                     await mcp_client.set_ready(True)
-                    logger.bind(tag=TAG).debug("所有工具已获取，MCP客户端准备就绪")
+                    logger.bind(tag=TAG).info(
+                        f"所有设备MCP工具已获取，MCP客户端准备就绪: {list(mcp_client.tools.keys())}"
+                    )
 
                     # 刷新工具缓存，确保MCP工具被包含在函数列表中
                     if hasattr(conn, "func_handler") and conn.func_handler:
