@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,31 +37,16 @@ class TencentMemoryAdapter(MemoryService):
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self.logger = setup_logging(self.config)
-        self.endpoint = os.getenv(
-            "TENCENT_MEMORY_BASE_URL",
-            str(self.config.get("tencent_memory_base_url", "http://127.0.0.1:8420")),
-        ).rstrip("/")
-        self.api_key = os.getenv(
-            "TENCENT_MEMORY_API_KEY",
-            str(self.config.get("tencent_memory_api_key", "")),
-        )
-        self.service_id = os.getenv(
-            "TENCENT_MEMORY_SERVICE_ID",
-            str(self.config.get("tencent_memory_service_id", "default")),
-        )
-        self.timeout = float(os.getenv(
-            "TENCENT_MEMORY_TIMEOUT",
-            str(self.config.get("tencent_memory_timeout", 3)),
-        ))
-        self.recall_timeout = float(os.getenv(
-            "TENCENT_MEMORY_RECALL_TIMEOUT",
-            str(self.config.get("tencent_memory_recall_timeout", 2)),
-        ))
+        self.endpoint = str(self.config.get("tencent_memory_base_url", "http://127.0.0.1:8420")).rstrip("/")
+        self.api_key = str(self.config.get("tencent_memory_api_key", ""))
+        self.service_id = str(self.config.get("tencent_memory_service_id", "default"))
+        self.timeout = float(self.config.get("tencent_memory_timeout", 3))
+        self.recall_timeout = float(self.config.get("tencent_memory_recall_timeout", 2))
         self.max_results = int(self.config.get("tencent_memory_max_results", 5))
         self.identity = MemoryIdentity(
-            os.getenv("TENCENT_MEMORY_TEAM_ID", str(self.config.get("tencent_memory_team_id", "personal"))),
-            os.getenv("TENCENT_MEMORY_AGENT_ID", str(self.config.get("tencent_memory_agent_id", "central-controller"))),
-            os.getenv("TENCENT_MEMORY_USER_ID", str(self.config.get("tencent_memory_user_id") or self.config.get("owner_id") or "yin2hao")),
+            str(self.config.get("tencent_memory_team_id", "personal")),
+            str(self.config.get("tencent_memory_agent_id", "central-controller")),
+            str(self.config.get("tencent_memory_user_id") or self.config.get("owner_id") or "yin2hao"),
         )
         self._client = requests.Session()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory-commit")

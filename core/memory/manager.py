@@ -59,8 +59,8 @@ class MemoryManager:
 
     def __init__(self, config: dict):
         self.config = config or {}
-        configured_backend = os.getenv("MEMORY_BACKEND", self.config.get("memory_backend", "legacy"))
-        memory_enabled = os.getenv("TENCENT_MEMORY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+        configured_backend = str(self.config.get("memory_backend", "legacy"))
+        memory_enabled = str(self.config.get("tencent_memory_enabled", False)).strip().lower() in {"1", "true", "yes", "on"}
         self.backend_name = ("tencent" if memory_enabled else str(configured_backend)).strip().lower()
         selected = self.config.get("selected_module", {}).get("Memory", "")
         memory_config = self.config.get("Memory", {}).get(selected, {})
