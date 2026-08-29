@@ -34,3 +34,5 @@ The adapter calls `/v2/atomic/search` once before each LLM turn,
 and do not fail the ASR/LLM/MCP/TTS request.
 
 统一用户 ID 配置为 `gu`，QQ 和 ESP 共用该身份。
+当前映射为 QQ `2496303940 -> gu`，唯一 ESP 设备 `* -> gu`；外部账号和设备 ID
+只用于渠道识别，不会作为 TencentDB 的 `user_id`。

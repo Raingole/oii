@@ -15,8 +15,15 @@ class IdentityResolver:
         self.team_id = str(config.get("tencent_memory_team_id", "personal"))
         self.agent_id = str(config.get("tencent_memory_agent_id", "central-controller"))
         self.user_id = str(config.get("tencent_memory_user_id") or config.get("owner_id") or "gu")
+        self.channel_users = config.get("tencent_memory_identity", {})
 
     def resolve(self, channel: str = "", external_id: str = "") -> MemoryIdentity:
-        # Channel/external_id are intentionally audit metadata only. They must
-        # never become the TencentDB user_id, otherwise QQ and ESP memories split.
-        return MemoryIdentity(self.team_id, self.agent_id, self.user_id)
+        # Explicit channel mappings are still resolved to one stable user. The
+        # external IDs never become TencentDB user IDs themselves.
+        channel_map = self.channel_users.get(channel, {}) if isinstance(self.channel_users, dict) else {}
+        mapped_user = (
+            channel_map.get(str(external_id)) or channel_map.get("*")
+            if isinstance(channel_map, dict)
+            else None
+        )
+        return MemoryIdentity(self.team_id, self.agent_id, str(mapped_user or self.user_id))
