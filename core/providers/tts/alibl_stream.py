@@ -238,7 +238,10 @@ class TTSProvider(TTSProviderBase):
         logger.bind(tag=TAG).debug(f"开始会话～～{session_id}")
         try:
             # 上个会话处于激活状态时关闭上个连接新建链接
-            if self.activate_session:
+            # Every run-task must use a fresh upstream TTS session. After
+            # finish-task, the old websocket may still exist but cannot accept
+            # another run-task.
+            if self.activate_session or self.ws:
                 await self.close()
 
             # 设置会话激活标志
