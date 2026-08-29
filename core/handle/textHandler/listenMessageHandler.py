@@ -31,6 +31,9 @@ async def _send_wake_ack(conn: "ConnectionHandler", turn_id: int, sentence_id: s
         )
         if not opus_packets or not conn.is_current_turn(turn_id):
             return
+        # Keep the same control-message order as normal TTS responses.
+        # ESP expects tts/start before sentence_start and audio frames.
+        await send_tts_message(conn, "start", turn_id=turn_id)
         await sendAudioMessage(conn, SentenceType.FIRST, opus_packets, "我在", sentence_id)
         await sendAudioMessage(conn, SentenceType.LAST, [], None, sentence_id)
         conn.logger.bind(tag=TAG).info(
