@@ -315,6 +315,7 @@ async def call_mcp_tool(
         raise ValueError(f"工具 {tool_name} 不存在")
 
     tool_call_id = await mcp_client.get_next_id()
+    turn_id = getattr(conn, "active_turn_id", None)
     result_future = asyncio.Future()
     await mcp_client.register_call_result_future(tool_call_id, result_future)
 
@@ -376,13 +377,24 @@ async def call_mcp_tool(
         "params": {"name": actual_name, "arguments": arguments},
     }
 
-    logger.bind(tag=TAG).info(f"发送客户端mcp工具调用请求: {actual_name}，参数: {args}")
+    logger.bind(tag=TAG).info(
+        f"[session={getattr(conn, 'session_id', '')} turn={turn_id} tool_call_id={tool_call_id}] "
+        f"发送客户端mcp工具调用请求: {actual_name}，参数: {args}"
+    )
     await send_mcp_message(conn, payload)
 
     try:
         # Wait for response or timeout
         raw_result = await asyncio.wait_for(result_future, timeout=timeout)
+        if turn_id is not None and not conn.is_current_turn(turn_id):
+            logger.bind(tag=TAG).info(
+                f"[session={getattr(conn, 'session_id', '')} turn={turn_id} tool_call_id={tool_call_id}] "
+                "stale MCP result discarded"
+            )
+            await mcp_client.cleanup_call_result(tool_call_id)
+            return "{\"stale\":true}"
         logger.bind(tag=TAG).info(
+            f"[session={getattr(conn, 'session_id', '')} turn={turn_id} tool_call_id={tool_call_id}] "
             f"客户端mcp工具调用 {actual_name} 成功，原始结果: {raw_result}"
         )
 

@@ -46,6 +46,13 @@ from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
 from core.conversation import ConversationSession, ConversationState
+from core.turn import (
+    AudioInputState,
+    ConnectionState,
+    TurnManager,
+    TurnState,
+    TTSState,
+)
 
 
 TAG = __name__
@@ -175,6 +182,7 @@ class ConnectionHandler:
 
         # tts相关变量
         self.sentence_id = None
+        self.sentence_turn_ids: dict[str, int | None] = {}
         # 处理TTS响应没有文本返回
         self.tts_MessageText = ""
 
@@ -195,6 +203,13 @@ class ConnectionHandler:
         self.waiting_for_wake_word = True
         self.conversation_lock = asyncio.Lock()
         self._conversation_end_finalizing = False
+        self.connection_state = ConnectionState.CONNECTED
+        self.audio_input_state = AudioInputState.IDLE
+        self.tts_state = TTSState.IDLE
+        self.turn_manager = TurnManager(self.logger)
+        self.active_turn = None
+        self.active_turn_id = None
+        self._turn_start_ready: dict[str, int] = {}
         self.load_function_plugin = False
         self.intent_type = "nointent"
 
@@ -223,8 +238,89 @@ class ConnectionHandler:
         self.last_tool_result = None
         self.current_user_query = ""
 
+    async def start_turn(self, client_event_id: str = "", sample_rate=None):
+        """Start or replay an idempotent input turn without closing the socket."""
+        turn, duplicate = await self.turn_manager.start(client_event_id)
+        if duplicate and self.active_turn and self.active_turn.turn_id != turn.turn_id:
+            self.logger.bind(tag=TAG).info(
+                f"[session={self.session_id} turn={turn.turn_id}] late duplicate listen/start acknowledged"
+            )
+            return turn, True
+        self.active_turn = turn
+        self.active_turn_id = turn.turn_id
+        self.audio_input_state = AudioInputState.LISTENING
+        if duplicate:
+            self.logger.bind(tag=TAG).info(
+                f"[session={self.session_id} turn={turn.turn_id}] duplicate listen/start acknowledged"
+            )
+            return turn, True
+        turn.state = TurnState.ASR
+        if sample_rate:
+            try:
+                self.sample_rate = int(sample_rate)
+            except (TypeError, ValueError):
+                pass
+        self.client_abort = False
+        self.client_voice_stop = False
+        self.clear_queues()
+        self.reset_audio_states()
+        self.asr_audio = []
+        self.sentence_id = str(uuid.uuid4().hex)
+        self.logger.bind(tag=TAG).info(
+            f"[session={self.session_id} turn={turn.turn_id}] listen/start"
+            f"{' duplicate' if duplicate else ''}"
+        )
+        turn.input_timeout_task = asyncio.create_task(
+            self._expire_turn_input(turn)
+        )
+        return turn, duplicate
+
+    async def _expire_turn_input(self, turn):
+        timeout = int(self.config.get("turn_input_timeout", 30))
+        try:
+            await asyncio.sleep(timeout)
+            if self.is_current_turn(turn.turn_id) and turn.state == TurnState.ASR:
+                self.logger.bind(tag=TAG).warning(
+                    f"[session={self.session_id} turn={turn.turn_id}] ASR input timeout"
+                )
+                await self.cancel_current_turn("input_timeout")
+        except asyncio.CancelledError:
+            return
+
+    async def cancel_current_turn(self, reason="cancelled"):
+        turn = await self.turn_manager.cancel_active()
+        if turn:
+            self.logger.bind(tag=TAG).info(
+                f"[session={self.session_id} turn={turn.turn_id}] turn cancelled: {reason}"
+            )
+        self.client_abort = True
+        self.audio_input_state = AudioInputState.IDLE
+        self.tts_state = TTSState.CANCELLED
+        self.asr_audio = []
+        self.client_voice_stop = False
+        self.clear_queues()
+        return turn
+
+    def is_current_turn(self, turn_id=None):
+        try:
+            normalized = int(turn_id) if turn_id is not None else None
+        except (TypeError, ValueError):
+            normalized = None
+        return self.turn_manager.is_current(normalized)
+
+    async def send_listen_ready(self, turn_id: int):
+        if not self.websocket or self.stop_event.is_set():
+            return
+        await self.websocket.send(json.dumps({
+            "type": "listen",
+            "state": "ready",
+            "session_id": self.session_id,
+            "turn_id": turn_id,
+        }))
+
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
+            self.connection_state = ConnectionState.CONNECTED
             # 获取运行中的事件循环（必须在异步上下文中）
             self.loop = asyncio.get_running_loop()
 
@@ -289,6 +385,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}-{stack_trace}")
             return
         finally:
+            self.connection_state = ConnectionState.DISCONNECTED
             if self.server:
                 self.server.unregister_connection(self)
             try:
@@ -396,6 +493,8 @@ class ConnectionHandler:
             # 空闲连接不把音频交给 ASR，但仍保留 WebSocket 下行能力。
             if self.conversation_state != ConversationState.ACTIVE:
                 return
+            if self.audio_input_state != AudioInputState.LISTENING:
+                return
             if self.active_conversation is None or not self.active_conversation.active:
                 return
             if self.vad is None or self.asr is None:
@@ -410,7 +509,7 @@ class ConnectionHandler:
             # 入口处直接解码PCM，避免VAD和ASR重复解码
             pcm_frame = self._decode_opus_packet(message)
             if pcm_frame:
-                self.asr_audio_queue.put(pcm_frame)
+                self.asr_audio_queue.put((self.active_turn_id, pcm_frame))
 
     async def _process_mqtt_audio_message(self, message):
         """
@@ -436,7 +535,7 @@ class ConnectionHandler:
             if timestamp > 0 and self.client_aec:
                 pcm_frame = self._apply_aec(timestamp, pcm_frame)
 
-            self.asr_audio_queue.put(pcm_frame)
+            self.asr_audio_queue.put((self.active_turn_id, pcm_frame))
             return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"解析WebSocket音频包失败: {e}")
@@ -1081,7 +1180,15 @@ class ConnectionHandler:
     def chat(self, query, depth=0):
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        current_turn_id = self.active_turn_id
         query_text = query.get("content", "") if isinstance(query, dict) else str(query or "")
+        if current_turn_id is not None and not self.is_current_turn(current_turn_id):
+            self.logger.bind(tag=TAG).info(
+                f"[session={self.session_id} turn={current_turn_id}] stale LLM task discarded"
+            )
+            return
+        if self.active_turn is not None and current_turn_id == self.active_turn.turn_id:
+            self.active_turn.state = TurnState.THINKING
         if depth == 0:
             self.current_user_query = query_text
 
@@ -1092,12 +1199,16 @@ class ConnectionHandler:
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
+            self.sentence_turn_ids[current_sentence_id] = current_turn_id
+            if len(self.sentence_turn_ids) > 256:
+                self.sentence_turn_ids.pop(next(iter(self.sentence_turn_ids)))
             self.dialogue.put(Message(role="user", content=query))
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=current_sentence_id,
                     sentence_type=SentenceType.FIRST,
                     content_type=ContentType.ACTION,
+                    turn_id=current_turn_id,
                 )
             )
         else:
@@ -1193,7 +1304,13 @@ class ConnectionHandler:
         emotion_flag = True
         try:
             for response in llm_responses:
-                if self.client_abort:
+                if self.client_abort or (
+                    current_turn_id is not None
+                    and not self.is_current_turn(current_turn_id)
+                ):
+                    self.logger.bind(tag=TAG).info(
+                        f"[session={self.session_id} turn={current_turn_id}] LLM stream cancelled or stale"
+                    )
                     break
                 if self.intent_type == "function_call" and functions is not None:
                     content, tools_call = response
@@ -1278,6 +1395,11 @@ class ConnectionHandler:
             return
         # 处理function call
         if tool_call_flag:
+            if current_turn_id is not None and not self.is_current_turn(current_turn_id):
+                self.logger.bind(tag=TAG).info(
+                    f"[session={self.session_id} turn={current_turn_id}] stale MCP result discarded"
+                )
+                return
             bHasError = False
             # 处理基于文本的工具调用格式
             if len(tool_calls_list) == 0 and content_arguments:
@@ -1351,6 +1473,8 @@ class ConnectionHandler:
                     tool_calls_list = real_tool_calls
 
             if not bHasError and len(tool_calls_list) > 0:
+                if self.active_turn is not None and current_turn_id == self.active_turn.turn_id:
+                    self.active_turn.state = TurnState.TOOL_CALLING
                 self.logger.bind(tag=TAG).debug(
                     f"检测到 {len(tool_calls_list)} 个工具调用"
                 )
@@ -1366,6 +1490,7 @@ class ConnectionHandler:
                 # 收集所有工具调用的 Future
                 futures_with_data = []
                 for tool_call_data in tool_calls_list:
+                    tool_call_data["turn_id"] = current_turn_id
                     self.logger.bind(tag=TAG).debug(
                         f"function_name={tool_call_data['name']}, function_id={tool_call_data['id']}, function_arguments={tool_call_data['arguments']}"
                     )
@@ -1390,6 +1515,11 @@ class ConnectionHandler:
                 for future, tool_call_data, tool_input in futures_with_data:
                     try:
                         result = future.result(timeout=tool_call_timeout)
+                        if current_turn_id is not None and not self.is_current_turn(current_turn_id):
+                            self.logger.bind(tag=TAG).info(
+                                f"[session={self.session_id} turn={current_turn_id}] stale tool result discarded"
+                            )
+                            continue
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
                         enqueue_tool_report(self, tool_call_data['name'], tool_input, str(result.result) if result.result else None, report_tool_call=False)
@@ -1431,11 +1561,19 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).info(f"回复末尾追加新消息提醒: {note}")
 
         if depth == 0:
+            if current_turn_id is not None and not self.is_current_turn(current_turn_id):
+                self.logger.bind(tag=TAG).info(
+                    f"[session={self.session_id} turn={current_turn_id}] stale final response discarded"
+                )
+                return
+            if self.active_turn is not None and current_turn_id == self.active_turn.turn_id:
+                self.active_turn.state = TurnState.RESPONDING
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=current_sentence_id,
                     sentence_type=SentenceType.LAST,
                     content_type=ContentType.ACTION,
+                    turn_id=current_turn_id,
                 )
             )
 
@@ -1640,6 +1778,7 @@ class ConnectionHandler:
         """资源清理方法"""
         try:
             self.websocket_connected = False
+            self.connection_state = ConnectionState.DISCONNECTED
             # 清理 VAD 连接资源
             if (
                     hasattr(self, "vad")
@@ -1861,6 +2000,7 @@ class ConnectionHandler:
 
     async def end_conversation(self, reason="conversation_end", notify_client=True, notify_state="end"):
         """End one conversation and keep the owning ESP WebSocket alive."""
+        await self.cancel_current_turn(reason)
         conversation = self.current_conversation_session or self.active_conversation
         if conversation is None:
             self._set_conversation_state(ConversationState.WAIT_WAKE_WORD)

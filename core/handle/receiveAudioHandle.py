@@ -14,7 +14,12 @@ from core.handle.sendAudioHandle import send_stt_message, SentenceType
 TAG = __name__
 
 
-async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
+async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame, turn_id=None):
+    if turn_id is not None and not conn.is_current_turn(turn_id):
+        conn.logger.bind(tag=TAG).info(
+            f"[session={conn.session_id} turn={turn_id}] stale ASR frame discarded"
+        )
+        return
     # Audio is connection-scoped, but it must only enter ASR for an active
     # conversation. This also protects packets already queued during ENDING.
     if getattr(conn.conversation_state, "name", "") != "ACTIVE":
@@ -116,7 +121,9 @@ async def startToChat(conn: "ConnectionHandler", text):
     # 准备开始新会话
     conn.client_abort = False
 
-    conn.executor.submit(conn.chat, actual_text)
+    llm_future = conn.executor.submit(conn.chat, actual_text)
+    if getattr(conn, "active_turn", None) is not None:
+        conn.active_turn.llm_task = llm_future
 
 
 async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):

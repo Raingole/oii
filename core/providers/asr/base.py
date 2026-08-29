@@ -44,10 +44,19 @@ class ASRProviderBase(ABC):
         while not conn.stop_event.is_set():
             try:
                 message = conn.asr_audio_queue.get(timeout=1)
+                if isinstance(message, tuple) and len(message) == 2:
+                    turn_id, message = message
+                else:
+                    turn_id = getattr(conn, "active_turn_id", None)
                 if conn.active_conversation is None or not conn.active_conversation.active:
                     continue
+                if turn_id is not None and not conn.is_current_turn(turn_id):
+                    logger.bind(tag=TAG).info(
+                        f"[session={conn.session_id} turn={turn_id}] stale ASR frame discarded"
+                    )
+                    continue
                 future = asyncio.run_coroutine_threadsafe(
-                    handleAudioMessage(conn, message),
+                    handleAudioMessage(conn, message, turn_id),
                     conn.loop,
                 )
                 future.result()
@@ -88,6 +97,12 @@ class ASRProviderBase(ABC):
     async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
         """并行处理ASR和声纹识别"""
         try:
+            turn_id = getattr(conn, "active_turn_id", None)
+            if turn_id is not None and not conn.is_current_turn(turn_id):
+                logger.bind(tag=TAG).info(
+                    f"[session={conn.session_id} turn={turn_id}] stale ASR input discarded"
+                )
+                return
             total_start_time = time.monotonic()
 
             # 数据已经是PCM直接使用
@@ -115,6 +130,12 @@ class ASRProviderBase(ABC):
             else:
                 asr_result = await asr_task
                 voiceprint_result = None
+
+            if turn_id is not None and not conn.is_current_turn(turn_id):
+                logger.bind(tag=TAG).info(
+                    f"[session={conn.session_id} turn={turn_id}] stale ASR result discarded"
+                )
+                return
 
             # 记录识别结果 - 检查是否为异常
             if isinstance(asr_result, Exception):

@@ -397,6 +397,14 @@ class TTSProviderBase(ABC):
                         self._process_audio_file_stream(
                             tts_file, callback=self.handle_opus
                         )
+                if (
+                    getattr(message, "turn_id", None) is not None
+                    and not conn.is_current_turn(message.turn_id)
+                ):
+                    logger.bind(tag=TAG).info(
+                        f"[session={conn.session_id} turn={message.turn_id}] stale TTS text discarded"
+                    )
+                    continue
                 if message.sentence_type == SentenceType.LAST:
                     self._process_remaining_text_stream(opus_handler=self.handle_opus)
                     self.tts_audio_queue.put(

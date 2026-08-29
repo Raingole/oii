@@ -92,7 +92,11 @@ class ToolManager:
                 )
 
             # 执行工具
-            self.logger.info(f"执行工具: {tool_name}，参数: {arguments}")
+            self.logger.info(
+                f"[session={getattr(self.conn, 'session_id', '')} "
+                f"turn={getattr(self.conn, 'active_turn_id', None)}] "
+                f"执行工具: {tool_name}，参数: {arguments}"
+            )
             result = await executor.execute(self.conn, tool_name, arguments)
             self.logger.debug(f"工具执行结果: {result}")
             return result

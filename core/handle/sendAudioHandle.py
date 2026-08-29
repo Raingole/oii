@@ -10,6 +10,7 @@ from core.utils import textUtils
 from core.utils.util import audio_to_data
 from core.providers.tts.dto.dto import SentenceType
 from core.utils.audioRateController import AudioRateController
+from core.turn import AudioInputState, TurnState, TTSState
 
 TAG = __name__
 # 音频帧时长（毫秒）
@@ -21,7 +22,13 @@ PRE_BUFFER_COUNT = 5
 async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
     # 跳过旧句子残留音频
     if sentence_id is not None and sentence_id != conn.sentence_id:
+        conn.logger.bind(tag=TAG).info(
+            f"[session={conn.session_id} turn={getattr(conn, 'sentence_turn_ids', {}).get(sentence_id)}] stale TTS packet discarded"
+        )
         return
+    message_turn_id = getattr(conn, "sentence_turn_ids", {}).get(
+        sentence_id, getattr(conn, "active_turn_id", None)
+    )
 
     if conn.tts.tts_audio_first_sentence:
         conn.logger.bind(tag=TAG).info(f"发送第一段语音: {text}")
@@ -36,11 +43,11 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             == conn.sentence_id
         ):
             conn.audio_rate_controller.add_message(
-                lambda: send_tts_message(conn, "sentence_start", text)
+                lambda: send_tts_message(conn, "sentence_start", text, message_turn_id)
             )
         else:
             # 新句子或流控器未初始化，立即发送
-            await send_tts_message(conn, "sentence_start", text)
+            await send_tts_message(conn, "sentence_start", text, message_turn_id)
 
     await sendAudio(conn, audios)
     # 发送句子开始消息
@@ -50,7 +57,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
     # 发送结束消息（如果是最后一个文本）
     # 通话需要维持speaking状态
     if not conn.calling and sentenceType == SentenceType.LAST:
-        await send_tts_message(conn, "stop", None)
+        await send_tts_message(conn, "stop", None, message_turn_id)
         if conn.close_after_chat:
             await conn.close()
 
@@ -276,12 +283,21 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     flow_control["sequence"] = sequence + 1
 
 
-async def send_tts_message(conn: "ConnectionHandler", state, text=None):
+async def send_tts_message(conn: "ConnectionHandler", state, text=None, turn_id=None):
     """发送 TTS 状态消息"""
     end_after_tts = False
     if text is None and state == "sentence_start":
         return
-    message = {"type": "tts", "state": state, "session_id": conn.session_id}
+    if turn_id is None:
+        turn_id = getattr(conn, "active_turn_id", None)
+    if state == "start":
+        conn.tts_state = TTSState.STREAMING
+    message = {
+        "type": "tts",
+        "state": state,
+        "session_id": conn.session_id,
+        "turn_id": turn_id,
+    }
     if text is not None:
         message["text"] = textUtils.check_emoji(text)
 
@@ -315,9 +331,22 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
             conn.reset_context_after_chat = False
             end_after_tts = True
 
+        if turn_id is not None and conn.is_current_turn(turn_id):
+            conn.tts_state = TTSState.IDLE
+            conn.audio_input_state = AudioInputState.IDLE
+            if conn.active_turn is not None:
+                conn.active_turn.state = TurnState.COMPLETED
+
     # 发送消息到客户端
     try:
         await conn.websocket.send(json.dumps(message))
+        if state == "stop" and turn_id is not None and conn.is_current_turn(turn_id):
+            await conn.websocket.send(json.dumps({
+                "type": "turn",
+                "state": "completed",
+                "session_id": conn.session_id,
+                "turn_id": turn_id,
+            }))
     finally:
         if end_after_tts:
             await conn.end_conversation(reason="conversation_end", notify_state="end")

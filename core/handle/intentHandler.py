@@ -476,6 +476,8 @@ async def process_intent_result(
 
 def speak_txt(conn: "ConnectionHandler", text):
     # 记录文本到 sentence_id 映射
+    if getattr(conn, "sentence_id", None) is not None:
+        conn.sentence_turn_ids[conn.sentence_id] = getattr(conn, "active_turn_id", None)
     conn.tts.store_tts_text(conn.sentence_id, text)
 
     conn.tts.tts_text_queue.put(
@@ -483,6 +485,7 @@ def speak_txt(conn: "ConnectionHandler", text):
             sentence_id=conn.sentence_id,
             sentence_type=SentenceType.FIRST,
             content_type=ContentType.ACTION,
+            turn_id=getattr(conn, "active_turn_id", None),
         )
     )
     conn.tts.tts_one_sentence(conn, ContentType.TEXT, content_detail=text)
@@ -491,6 +494,7 @@ def speak_txt(conn: "ConnectionHandler", text):
             sentence_id=conn.sentence_id,
             sentence_type=SentenceType.LAST,
             content_type=ContentType.ACTION,
+            turn_id=getattr(conn, "active_turn_id", None),
         )
     )
     conn.dialogue.put(Message(role="assistant", content=text))

@@ -141,6 +141,16 @@ class UnifiedToolHandler:
     ) -> Optional[ActionResponse]:
         """处理LLM函数调用"""
         try:
+            requested_turn_id = function_call_data.get("turn_id")
+            if (
+                requested_turn_id is not None
+                and hasattr(conn, "is_current_turn")
+                and not conn.is_current_turn(requested_turn_id)
+            ):
+                self.logger.info(
+                    f"[session={getattr(conn, 'session_id', '')} turn={requested_turn_id}] stale tool call discarded"
+                )
+                return ActionResponse(action=Action.NONE)
             # 处理多函数调用
             if "function_calls" in function_call_data:
                 responses = []

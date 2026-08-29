@@ -170,6 +170,14 @@ class TTSProvider(TTSProviderBase):
                         # 先处理文件音频数据
                         self._process_audio_file_stream(message.content_file, callback=lambda audio_data: self.handle_audio_file(audio_data, message.content_detail))
 
+                if (
+                    getattr(message, "turn_id", None) is not None
+                    and not self.conn.is_current_turn(message.turn_id)
+                ):
+                    logger.bind(tag=TAG).info(
+                        f"[session={self.conn.session_id} turn={message.turn_id}] stale TTS text discarded"
+                    )
+                    continue
                 if message.sentence_type == SentenceType.LAST:
                     try:
                         logger.bind(tag=TAG).debug("开始结束TTS会话...")

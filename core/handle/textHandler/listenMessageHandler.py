@@ -33,15 +33,15 @@ class ListenTextMessageHandler(TextMessageHandler):
             if conn.conversation_state.name == "WAIT_WAKE_WORD":
                 conn.logger.bind(tag=TAG).info("Ignore listen/start: waiting for wake word")
                 return
-            if conn.conversation_state.name == "ENDING":
-                conn.logger.bind(tag=TAG).info("Ignore listen/start while conversation is ending")
-                return
             if conn.active_conversation is None or not conn.active_conversation.active:
                 conn.logger.bind(tag=TAG).info("Ignore listen/start: no active conversation")
                 return
             if "mode" in msg_json:
                 conn.client_listen_mode = msg_json["mode"]
-            conn.reset_audio_states()
+            turn, duplicate = await conn.start_turn(
+                msg_json.get("client_event_id", ""), msg_json.get("sample_rate")
+            )
+            await conn.send_listen_ready(turn.turn_id)
             await conn.send_conversation_state("active")
             return
         if state == "detect":
@@ -70,11 +70,21 @@ class ListenTextMessageHandler(TextMessageHandler):
         if msg_json["state"] == "stop":
             if conn.active_conversation is None:
                 return
+            requested_turn_id = msg_json.get("turn_id")
+            if requested_turn_id is not None and not conn.is_current_turn(requested_turn_id):
+                conn.logger.bind(tag=TAG).info(
+                    f"Ignore stale listen/stop: turn_id={requested_turn_id}, active={conn.active_turn_id}"
+                )
+                return
             # 收到stop但asr未初始化，跳过处理
             if conn.asr is None:
                 return
 
             conn.client_voice_stop = True
+            if conn.active_turn is not None:
+                from core.turn import AudioInputState, TurnState
+                conn.audio_input_state = AudioInputState.IDLE
+                conn.active_turn.state = TurnState.ASR
             if conn.asr.interface_type == InterfaceType.STREAM:
                 # 流式模式下，发送结束请求
                 asyncio.create_task(conn.asr._send_stop_request())
@@ -85,7 +95,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     conn.reset_audio_states()
 
                     if len(asr_audio_task) > 0:
-                        await conn.asr.handle_voice_stop(conn, asr_audio_task)
+                        asyncio.create_task(conn.asr.handle_voice_stop(conn, asr_audio_task))
         elif msg_json["state"] == "detect":
             if conn.active_conversation is None:
                 return
@@ -132,4 +142,5 @@ class ListenTextMessageHandler(TextMessageHandler):
                 # 唤醒词由 ESP 本地检测；detect 到达这里时已经是用户实际语音。
                 conn.just_woken_up = True
                 enqueue_asr_report(conn, original_text, [])
-                await startToChat(conn, original_text)
+                # Keep the WebSocket reader responsive while LLM/MCP/TTS run.
+                asyncio.create_task(startToChat(conn, original_text))
