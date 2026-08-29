@@ -39,6 +39,22 @@ class QQAgentContext:
         self.last_tool_result = None
         self.current_user_query = ""
 
+    @property
+    def device_connection(self):
+        """Return the configured or first online ESP for QQ device controls."""
+        if self.server is None:
+            return None
+        connections = getattr(self.server, "connections", {})
+        preferred_id = str(self.config.get("qq", {}).get("device_id", "")).strip()
+        if preferred_id and preferred_id in connections:
+            candidate = connections[preferred_id]
+            if getattr(candidate, "mcp_client", None):
+                return candidate
+        for candidate in connections.values():
+            if getattr(candidate, "mcp_client", None):
+                return candidate
+        return None
+
 
 class QQAgent:
     def __init__(self, config: dict, llm: Any, controller=None):
@@ -85,6 +101,9 @@ class QQAgent:
             if self.context.memory_manager:
                 self.context.user_id = self.context.memory_manager.resolve_owner("qq", external_id)
             self.context.last_tool_result = session.last_tool_result
+            # The ESP may connect after the QQ agent; refresh device tools for
+            # every QQ turn so the current MCP tool list is visible.
+            self.context.func_handler.tool_manager.refresh_tools()
             answer = await self.pipeline.process(self.context, text, session_key)
             session.last_tool_result = self.context.last_tool_result
             return answer

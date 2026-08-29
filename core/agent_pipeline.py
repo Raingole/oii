@@ -5,6 +5,8 @@ from typing import Any
 
 from config.logger import setup_logging
 from core.utils.dialogue import Message
+from core.handle.intentHandler import detect_air_conditioner_request
+from plugins_func.register import Action
 
 TAG = __name__
 
@@ -45,6 +47,34 @@ class AgentPipeline:
         return "抱歉，我没有生成有效回复。"
 
     async def _turn(self, context: Any, session_id: str, remaining: int) -> str:
+        # Device controls have side effects. Route explicit air-conditioner
+        # requests directly so QQ cannot receive a fabricated success reply
+        # from the LLM without an actual ESP MCP call.
+        air_request = detect_air_conditioner_request(
+            getattr(context, "current_user_query", "")
+        )
+        if air_request:
+            tool_name, arguments = air_request
+            if not context.func_handler.has_tool(tool_name):
+                return "当前没有在线的空调设备，暂时无法执行此指令。"
+            if arguments is None:
+                return "可以，请告诉我目标温度，支持16到30度的制冷设定。"
+            result = await context.func_handler.handle_llm_function_call(
+                context,
+                {
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "id": f"qq-air-{session_id}",
+                },
+            )
+            if result.action in {Action.ERROR, Action.NOTFOUND}:
+                return result.response or result.result or "空调指令执行失败，请稍后再试。"
+            if tool_name.endswith("set_temperature"):
+                return f"红外指令已发送，已为你设置制冷{arguments['temperature']}度。"
+            if tool_name.endswith("power_off"):
+                return "空调关机红外指令已发送。"
+            return str(result.result or result.response or "未能获取最后一次空调指令。")
+
         functions = self._get_functions(context)
         dialogue = context.dialogue.get_llm_dialogue()
         memory_manager = getattr(context, "memory_manager", None)

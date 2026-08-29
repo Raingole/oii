@@ -22,11 +22,17 @@ class DeviceMCPExecutor(ToolExecutor):
     def __init__(self, conn):
         self.conn = conn
 
+    @staticmethod
+    def _device_connection(conn):
+        """Use the physical ESP connection for cross-channel calls such as QQ."""
+        return getattr(conn, "device_connection", None) or conn
+
     async def execute(
         self, conn: "ConnectionHandler", tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
         """执行设备端MCP工具"""
-        if not hasattr(conn, "mcp_client") or not conn.mcp_client:
+        device_conn = self._device_connection(conn)
+        if not hasattr(device_conn, "mcp_client") or not device_conn.mcp_client:
             return ActionResponse(
                 action=Action.ERROR,
                 response=self._failure_response(
@@ -34,7 +40,7 @@ class DeviceMCPExecutor(ToolExecutor):
                 ),
             )
 
-        if not await conn.mcp_client.is_ready():
+        if not await device_conn.mcp_client.is_ready():
             return ActionResponse(
                 action=Action.ERROR,
                 response=self._failure_response(
@@ -53,7 +59,9 @@ class DeviceMCPExecutor(ToolExecutor):
             args_str = json.dumps(arguments) if arguments else "{}"
 
             # 调用设备端MCP工具
-            result = await call_mcp_tool(conn, conn.mcp_client, tool_name, args_str)
+            result = await call_mcp_tool(
+                device_conn, device_conn.mcp_client, tool_name, args_str
+            )
 
             resultJson = None
             if isinstance(result, str):
@@ -129,11 +137,12 @@ class DeviceMCPExecutor(ToolExecutor):
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有设备端MCP工具"""
-        if not hasattr(self.conn, "mcp_client") or not self.conn.mcp_client:
+        device_conn = self._device_connection(self.conn)
+        if not hasattr(device_conn, "mcp_client") or not device_conn.mcp_client:
             return {}
 
         tools = {}
-        mcp_tools = self.conn.mcp_client.get_available_tools()
+        mcp_tools = device_conn.mcp_client.get_available_tools()
 
         for tool in mcp_tools:
             func_def = tool.get("function", {})
@@ -148,7 +157,8 @@ class DeviceMCPExecutor(ToolExecutor):
 
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的设备端MCP工具"""
-        if not hasattr(self.conn, "mcp_client") or not self.conn.mcp_client:
+        device_conn = self._device_connection(self.conn)
+        if not hasattr(device_conn, "mcp_client") or not device_conn.mcp_client:
             return False
 
-        return self.conn.mcp_client.has_tool(tool_name)
+        return device_conn.mcp_client.has_tool(tool_name)
