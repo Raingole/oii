@@ -38,6 +38,7 @@ class QQAgentContext:
         self.func_handler = UnifiedToolHandler(self)
         self.last_tool_result = None
         self.current_user_query = ""
+        self.turn_id = 0
 
     @property
     def device_connection(self):
@@ -97,6 +98,7 @@ class QQAgent:
         async with session.lock:
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
+            self.context.turn_id += 1
             external_id = session_key.rsplit(":", 1)[-1] if session_key else ""
             if self.context.memory_manager:
                 self.context.user_id = self.context.memory_manager.resolve_owner("qq", external_id)

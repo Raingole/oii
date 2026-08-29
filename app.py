@@ -154,6 +154,7 @@ async def main():
             timeout=3.0,
             return_when=asyncio.ALL_COMPLETED,
         )
+        ws_server.memory_manager.close()
         print("服务器已关闭，程序退出。")
 
 

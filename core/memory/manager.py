@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import threading
@@ -22,6 +23,8 @@ from config.config_loader import get_project_dir
 from config.logger import setup_logging
 
 from .vault import SecretVault
+from .identity import IdentityResolver
+from .tencent_memory import TencentMemoryAdapter
 
 TAG = __name__
 
@@ -56,6 +59,9 @@ class MemoryManager:
 
     def __init__(self, config: dict):
         self.config = config or {}
+        configured_backend = os.getenv("MEMORY_BACKEND", self.config.get("memory_backend", "legacy"))
+        memory_enabled = os.getenv("TENCENT_MEMORY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+        self.backend_name = ("tencent" if memory_enabled else str(configured_backend)).strip().lower()
         selected = self.config.get("selected_module", {}).get("Memory", "")
         memory_config = self.config.get("Memory", {}).get(selected, {})
         memory_config = memory_config if isinstance(memory_config, dict) else {}
@@ -72,11 +78,21 @@ class MemoryManager:
         self.vector_dimensions = 96
         self._lock = threading.RLock()
         self.logger = setup_logging(config)
+        self.identity_resolver = IdentityResolver(self.config)
+        self.tencent_backend = None
+        self._last_tencent_context = {}
+        if self.backend_name == "tencent":
+            self.tencent_backend = TencentMemoryAdapter(self.config)
+            self.tencent_backend.initialize()
         self.vault = SecretVault(self.database_path.parent / ".vault.key")
         self._initialize_database()
         self.logger.bind(tag=TAG).info(
-            f"统一单用户记忆已启用: owner={self.owner_id}, database={self.database_path}"
+            f"记忆后端已启用: backend={self.backend_name}, owner={self.owner_id}, database={self.database_path}"
         )
+
+    @property
+    def using_tencent(self) -> bool:
+        return self.tencent_backend is not None
 
     def _connect(self):
         db = sqlite3.connect(str(self.database_path), timeout=30)
@@ -201,6 +217,8 @@ class MemoryManager:
 
     def resolve_owner(self, channel: str = "", external_id: str = "") -> str:
         """Single-user identity resolver; external IDs are audit metadata only."""
+        if self.using_tencent:
+            return self.identity_resolver.resolve(channel, external_id).user_id
         if channel and external_id:
             now = _now()
             with self._lock, self._connect() as db:
@@ -373,7 +391,13 @@ class MemoryManager:
             lines.append(f"- Secret names (values are never included): {', '.join(data['secret_names'])}")
         return "\n".join(lines)
 
-    def retrieve_prompt(self, user_id: str, channel: str, session_id: str, query: str) -> str:
+    def retrieve_prompt(self, user_id: str, channel: str, session_id: str, query: str, turn_id=None) -> str:
+        if self.using_tencent:
+            context = self.tencent_backend.recall_for_turn(
+                user_id or self.owner_id, session_id, turn_id or "unknown", query
+            )
+            self._last_tencent_context[(user_id or self.owner_id, _text(query))] = context
+            return context
         data = self.retrieve(user_id, channel, session_id, query)
         if not data:
             return ""
@@ -567,7 +591,13 @@ class MemoryManager:
             row = db.execute(sql, args).fetchone()
         return {**dict(row), "data": _parse(row["data_json"], {})} if row else None
 
-    def record_tool_result(self, tool_name: str, value: Any, channel: str, session_id: str):
+    def record_tool_result(self, tool_name: str, value: Any, channel: str, session_id: str, turn_id=None, arguments=None):
+        if self.using_tencent:
+            self.tencent_backend.submit_tool_result(
+                self.resolve_owner(channel, session_id), session_id, turn_id or "unknown", tool_name,
+                arguments or {}, value,
+            )
+            return
         value = _parse(value, value)
         if not isinstance(value, dict):
             return
@@ -587,7 +617,14 @@ class MemoryManager:
             )
             self._index(db, "episode", "memory_episodes", cursor.lastrowid, summary)
 
-    def record_turn(self, user_text: str, assistant_text: str, channel: str, session_id: str, tool_result: Any = None):
+    def record_turn(self, user_text: str, assistant_text: str, channel: str, session_id: str, tool_result: Any = None, turn_id=None):
+        if self.using_tencent:
+            self.tencent_backend.submit_commit_turn(
+                self.resolve_owner(channel, session_id), session_id,
+                turn_id or "unknown", _text(user_text), _text(assistant_text),
+                channel or "unknown",
+            )
+            return
         now = _now()
         with self._lock, self._connect() as db:
             db.executemany(
@@ -637,6 +674,13 @@ class MemoryManager:
             result = result if isinstance(result, dict) else {}
         else:
             result = dict(arguments or {})
+        if self.using_tencent:
+            context = self._last_tencent_context.get((self.resolve_owner("", ""), _text(query)), "")
+            if "temperature" not in result and "temp" not in result:
+                match = re.search(r"(?:空调|默认)[^\n]{0,40}?([12]\d)\s*(?:度|℃)", context)
+                if match and 16 <= int(match.group(1)) <= 30:
+                    result["temperature"] = int(match.group(1))
+            return result
         air = "\u7a7a\u8c03"
         lowered = tool_name.lower()
         if air not in f"{tool_name} {query}" and not any(token in lowered for token in ("air_conditioner", "set_temperature")):
@@ -649,6 +693,10 @@ class MemoryManager:
 
     def observe_text(self, text: str, channel: str, session_id: str):
         """Promote only explicit, high-signal statements into long-term memory."""
+        if self.using_tencent:
+            # TencentDB extracts long-term atoms from committed conversations;
+            # do not duplicate the old local fact/profile pipeline.
+            return
         text = _text(text).rstrip("\u3002\uff01\uff1f!?\u3002")
         if not text:
             return
@@ -719,3 +767,8 @@ class MemoryManager:
         with self._lock, self._connect() as db:
             cursor = db.execute("UPDATE memory_secrets SET status='deleted',updated_at=? WHERE user_id=? AND name=? AND status='active'", (_now(), self.owner_id, _text(name)))
         return cursor.rowcount > 0
+
+    def close(self):
+        """Flush and release the selected remote backend, if any."""
+        if self.tencent_backend is not None:
+            self.tencent_backend.close()

@@ -26,6 +26,15 @@ class AgentPipeline:
             memory_manager.observe_text(query, channel, session_id)
         context.current_user_query = query
         context.dialogue.put(Message(role="user", content=query))
+        if memory_manager is not None:
+            context.memory_prompt = await asyncio.to_thread(
+                memory_manager.retrieve_prompt,
+                user_id,
+                channel,
+                session_id,
+                query,
+                getattr(context, "turn_id", "qq"),
+            )
         try:
             answer = await self._turn(context, session_id, int(self.config.get("tool_call_max_depth", 5)))
         except Exception as exc:
@@ -42,6 +51,7 @@ class AgentPipeline:
                     channel,
                     session_id,
                     getattr(context, "last_tool_result", None),
+                    turn_id=getattr(context, "turn_id", "qq"),
                 )
             return answer
         return "抱歉，我没有生成有效回复。"
@@ -79,12 +89,7 @@ class AgentPipeline:
         dialogue = context.dialogue.get_llm_dialogue()
         memory_manager = getattr(context, "memory_manager", None)
         if memory_manager is not None:
-            memory_prompt = memory_manager.retrieve_prompt(
-                getattr(context, "user_id", "owner"),
-                getattr(context, "channel", ""),
-                session_id,
-                getattr(context, "current_user_query", ""),
-            )
+            memory_prompt = getattr(context, "memory_prompt", "")
             if memory_prompt:
                 if dialogue and isinstance(dialogue[0], dict) and dialogue[0].get("role") == "system":
                     dialogue[0]["content"] = f"{dialogue[0].get('content', '')}\n\n{memory_prompt}"

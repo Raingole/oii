@@ -1261,7 +1261,8 @@ class ConnectionHandler:
             # 仅当query非空（代表用户询问）时查询记忆
             if self.memory_manager is not None and query_text:
                 memory_str = self.memory_manager.retrieve_prompt(
-                    self.user_id, self.channel, self.session_id, query_text
+                    self.user_id, self.channel, self.session_id, query_text,
+                    turn_id=current_turn_id,
                 )
             elif self.memory is not None and query:
                 future = asyncio.run_coroutine_threadsafe(
@@ -1585,12 +1586,19 @@ class ConnectionHandler:
                 )
             )
             if self.memory_manager is not None:
+                assistant_text = "".join(response_message)
+                if not assistant_text:
+                    for message in reversed(self.dialogue.dialogue):
+                        if message.role == "assistant" and message.content:
+                            assistant_text = message.content
+                            break
                 self.memory_manager.record_turn(
                     query_text,
-                    "".join(response_message),
+                    assistant_text,
                     self.channel,
                     self.session_id,
                     self.last_tool_result,
+                    turn_id=current_turn_id,
                 )
 
         return True

@@ -164,7 +164,7 @@ class UnifiedToolHandler:
                     result = await self.tool_manager.execute_tool(
                         call["name"], arguments
                     )
-                    self._remember_tool_result(call["name"], result)
+                    self._remember_tool_result(call["name"], result, arguments)
                     responses.append(result)
                 return self._combine_responses(responses)
 
@@ -198,14 +198,14 @@ class UnifiedToolHandler:
                     function_name, arguments, getattr(self.conn, "current_user_query", "")
                 )
             result = await self.tool_manager.execute_tool(function_name, arguments)
-            self._remember_tool_result(function_name, result)
+            self._remember_tool_result(function_name, result, arguments)
             return result
 
         except Exception as e:
             self.logger.error(f"处理function call错误: {e}")
             return ActionResponse(action=Action.ERROR, response=str(e))
 
-    def _remember_tool_result(self, tool_name: str, result: ActionResponse) -> None:
+    def _remember_tool_result(self, tool_name: str, result: ActionResponse, arguments=None) -> None:
         """Keep the latest structured tool output for channel-neutral follow-ups."""
         value = getattr(result, "result", None)
         if value is None:
@@ -223,6 +223,8 @@ class UnifiedToolHandler:
                 value,
                 getattr(self.conn, "channel", ""),
                 getattr(self.conn, "session_id", ""),
+                turn_id=getattr(self.conn, "active_turn_id", None),
+                arguments=arguments,
             )
 
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:
