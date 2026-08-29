@@ -38,14 +38,10 @@ def main() -> int:
         "TDAI_LLM_BASE_URL": str(llm.get("base_url", "https://api.openai.com/v1")),
         "TDAI_LLM_MODEL": str(llm.get("model_name", "gpt-4o")),
     })
-    gateway_key = str(config.get("tencent_memory_api_key", ""))
-    if gateway_key:
-        env["TDAI_GATEWAY_API_KEY"] = gateway_key
-    else:
-        # Do not accidentally enable MemoryCore auth from a stale shell or
-        # systemd environment when the controller config intentionally leaves
-        # tencent_memory_api_key empty for loopback standalone mode.
-        env.pop("TDAI_GATEWAY_API_KEY", None)
+    # MemoryCore's v2 data APIs require a Bearer token even in standalone
+    # loopback mode. Keep this value in data/.config.yaml with the controller.
+    gateway_key = str(config.get("tencent_memory_api_key") or "gu-memory-local").strip()
+    env["TDAI_GATEWAY_API_KEY"] = gateway_key
     print(f"[Memory] Starting pinned MemoryCore from {MEMORY_CORE}", flush=True)
     print(f"[Memory] Config source: {CONTROLLER_CONFIG}", flush=True)
     print(f"[Memory] Data directory: {env['TDAI_DATA_DIR']}", flush=True)

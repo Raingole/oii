@@ -32,6 +32,10 @@ Set `memory_backend: tencent` and `tencent_memory_enabled: true` in
 `data/.config.yaml`. No Tencent memory environment variables are required.
 Use `memory_backend: legacy` and `tencent_memory_enabled: false` for rollback.
 
+`tencent_memory_api_key` must contain the same local Bearer key used by
+MemoryCore's v2 data APIs. It is separate from the LLM API key; the local
+configuration uses `gu-memory-local`.
+
 The adapter calls `/v2/atomic/search` once before each LLM turn,
 `/v2/conversation/add` asynchronously after each completed turn, and
 `/v2/offload/ingest` asynchronously for tool pairs. Memory failures are logged

@@ -38,7 +38,8 @@ class TencentMemoryAdapter(MemoryService):
         self.config = config or {}
         self.logger = setup_logging(self.config)
         self.endpoint = str(self.config.get("tencent_memory_base_url", "http://127.0.0.1:8420")).rstrip("/")
-        self.api_key = str(self.config.get("tencent_memory_api_key", ""))
+        # MemoryCore v2 requires Authorization on data-plane endpoints.
+        self.api_key = str(self.config.get("tencent_memory_api_key") or "gu-memory-local")
         self.service_id = str(self.config.get("tencent_memory_service_id", "default"))
         self.timeout = float(self.config.get("tencent_memory_timeout", 3))
         self.recall_timeout = float(self.config.get("tencent_memory_recall_timeout", 2))
