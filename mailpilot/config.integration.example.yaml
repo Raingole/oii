@@ -9,8 +9,8 @@ imap:
 analyze:
   providers:
     - type: openai
-      model: deepseekv4flash
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model: deepseek-v4-flash
+      base_url: https://api.deepseek.com
       api_key: "填入百炼 API Key"
   timeout: 300
   language: 中文
