@@ -83,10 +83,11 @@ func (p *openaiProvider) finalStructuredWithContext(ctx context.Context, message
 	raw, err := p.postWithContext(ctx, map[string]any{
 		"model":    p.cfg.Model,
 		"messages": messages,
-		"response_format": map[string]any{
-			"type":        "json_schema",
-			"json_schema": map[string]any{"name": "mail_analysis", "schema": OutputSchema, "strict": true},
-		},
+		// DeepSeek's official Chat Completions API accepts json_object here;
+		// json_schema is supported by some OpenAI-compatible gateways but is
+		// rejected by the official endpoint. The system prompt still specifies
+		// the exact analysis fields and parseAnalysis validates the result.
+		"response_format": map[string]any{"type": "json_object"},
 	})
 	if err != nil {
 		return nil, transientErr(err) // 调用层故障：网络/限流/非 200，暂时性
