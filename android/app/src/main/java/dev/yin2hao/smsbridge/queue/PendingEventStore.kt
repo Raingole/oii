@@ -32,7 +32,10 @@ class PendingEventStore(context: Context) : SQLiteOpenHelper(context, "sms_bridg
         writableDatabase.delete("processed", "processed_at < ?", arrayOf((System.currentTimeMillis() - 86_400_000L).toString()))
     }
     @Synchronized fun fail(eventId: String) {
-        writableDatabase.execSQL("UPDATE pending SET retry_count = retry_count + 1, next_retry_at = ? WHERE event_id = ?", arrayOf(System.currentTimeMillis() + 5_000L, eventId))
+        var retryCount = 0
+        readableDatabase.query("pending", arrayOf("retry_count"), "event_id = ?", arrayOf(eventId), null, null, null).use { c -> if (c.moveToFirst()) retryCount = c.getInt(0) }
+        val delay = when (retryCount) { 0 -> 5_000L; 1 -> 15_000L; 2 -> 30_000L; 3 -> 60_000L; else -> 120_000L }
+        writableDatabase.execSQL("UPDATE pending SET retry_count = retry_count + 1, next_retry_at = ? WHERE event_id = ?", arrayOf(System.currentTimeMillis() + delay, eventId))
         writableDatabase.delete("pending", "retry_count > 8 OR timestamp < ?", arrayOf((System.currentTimeMillis() - 900_000L).toString()))
     }
 }

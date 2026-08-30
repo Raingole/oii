@@ -22,5 +22,15 @@ class SettingsStore(context: Context) {
     var rootFallback: Boolean
         get() = prefs.getBoolean("root_fallback", false)
         set(value) = prefs.edit().putBoolean("root_fallback", value).apply()
+    var rootSmsLastId: Long?
+        get() = if (prefs.contains("root_sms_last_id")) prefs.getLong("root_sms_last_id", 0L) else null
+        set(value) { prefs.edit().apply { if (value == null) remove("root_sms_last_id") else putLong("root_sms_last_id", value) }.apply() }
+    var lastHeartbeat: Long
+        get() = prefs.getLong("last_heartbeat", 0L)
+        set(value) = prefs.edit().putLong("last_heartbeat", value).apply()
+    fun setEnabledFromRoot(value: Boolean) {
+        prefs.edit().putBoolean("enabled", value).apply()
+        dev.yin2hao.smsbridge.root.RootManager.setWatchdogEnabled(value)
+    }
     companion object { const val DEFAULT_URL = "http://36.212.7.43:8005" }
 }
