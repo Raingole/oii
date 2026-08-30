@@ -44,6 +44,13 @@ async def load_config():
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
+    # MailPilot runs as a separate process. Environment variables override
+    # only the local webhook integration settings.
+    mailpilot = config.setdefault("mailpilot", {})
+    if os.environ.get("MAILPILOT_WEBHOOK_SECRET"):
+        mailpilot["webhook_secret"] = os.environ["MAILPILOT_WEBHOOK_SECRET"]
+    if os.environ.get("MAILPILOT_TARGET_QQ"):
+        mailpilot["target_qq"] = os.environ["MAILPILOT_TARGET_QQ"]
     # 初始化目录
     ensure_directories(config)
 

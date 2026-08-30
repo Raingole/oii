@@ -64,6 +64,14 @@ qq:
   allowed_users: []
   allowed_groups: []
   max_message_length: 4000
+
+# MailPilot only posts analyzed events here; the request cannot choose a QQ.
+# Prefer MAILPILOT_WEBHOOK_SECRET and MAILPILOT_TARGET_QQ environment variables.
+mailpilot:
+  webhook_secret: ""
+  target_qq: ""
+  dedup_ttl_seconds: 900
+  dedup_cache_size: 2048
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

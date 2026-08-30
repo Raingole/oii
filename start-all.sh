@@ -8,6 +8,7 @@ declare -a CHILD_PIDS=()
 MAIN_PID=""
 UI_PID=""
 MEMORY_PID=""
+MAILPILOT_PID=""
 
 cleanup() {
     local exit_code=$?
@@ -23,6 +24,10 @@ cleanup() {
 
     if [[ -n "${MEMORY_PID}" ]] && kill -0 "${MEMORY_PID}" 2>/dev/null; then
         kill "${MEMORY_PID}" 2>/dev/null || true
+    fi
+
+    if [[ -n "${MAILPILOT_PID}" ]] && kill -0 "${MAILPILOT_PID}" 2>/dev/null; then
+        kill "${MAILPILOT_PID}" 2>/dev/null || true
     fi
 
     for pid in "${CHILD_PIDS[@]:-}"; do
@@ -163,8 +168,41 @@ start_ui() {
     echo "[INFO] 网页启动成功，地址：http://36.212.7.43:${port}/"
 }
 
+start_mailpilot() {
+    local config_file="${MAILPILOT_CONFIG:-${ROOT_DIR}/data/.config.yaml}"
+    local binary="${MAILPILOT_BIN:-${ROOT_DIR}/mailpilot/mailpilot}"
+    local log_file="${LOG_DIR}/mailpilot.log"
+
+    [[ -f "${config_file}" ]] || {
+        echo "[ERROR] 缺少 MailPilot 配置: ${config_file}" >&2
+        exit 1
+    }
+    grep -Eq '^[[:space:]]*password:[[:space:]]*"[^" ]+"' "${config_file}" || {
+        echo "[ERROR] ${config_file} 未配置 IMAP 授权码" >&2
+        exit 1
+    }
+    if [[ ! -x "${binary}" ]]; then
+        command -v go >/dev/null 2>&1 || {
+            echo "[ERROR] 缺少 mailpilot 可执行文件，且服务器未安装 Go" >&2
+            exit 1
+        }
+        echo "[INFO] 未找到 mailpilot，正在从仓库源码构建"
+        (cd "${ROOT_DIR}/mailpilot" && go build -o "${binary}" .)
+    fi
+    echo "[INFO] 启动 MailPilot daemon，配置: ${config_file}"
+    "${binary}" daemon -c "${config_file}" >"${log_file}" 2>&1 &
+    MAILPILOT_PID=$!
+    CHILD_PIDS+=("${MAILPILOT_PID}")
+    sleep 2
+    if ! kill -0 "${MAILPILOT_PID}" 2>/dev/null; then
+        echo "[ERROR] MailPilot 启动失败，日志: ${log_file}" >&2
+        exit 1
+    fi
+}
+
 # MCP 后端使用 8766，聚合器使用 8765（小智只连接聚合器）
 start_ui
+start_mailpilot
 start_mcp "restaurant" "${ROOT_DIR}/mcp_restaurant_server/server.py" "8766"
 start_mcp "aggregator" "${ROOT_DIR}/mcp_aggregator/server.py" "8765"
 

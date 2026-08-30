@@ -1,0 +1,26 @@
+# Independent mailpilot daemon configuration for this repository.
+# The production configuration is data/.config.yaml. Keep all credentials in
+# that local file when using the repository's one-click startup script.
+imap:
+  host: imap.qq.com
+  user: 2496303940@qq.com
+  password: "请填入QQ邮箱IMAP授权码"
+
+analyze:
+  providers:
+    - type: openai
+      model: deepseekv4flash
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: "填入百炼 API Key"
+  timeout: 300
+  language: 中文
+
+notify:
+  - type: webhook
+    url: http://127.0.0.1:8003/webhook/mailpilot
+    format: generic
+    authorization: Bearer 填入与中控 mailpilot.webhook_secret 相同的密钥
+
+pipeline:
+  baseline_on_first_run: true
+  history_search: true
