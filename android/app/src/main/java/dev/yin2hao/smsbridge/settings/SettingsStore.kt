@@ -2,11 +2,11 @@ package dev.yin2hao.smsbridge.settings
 
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 
 class SettingsStore(context: Context) {
     private val prefs = EncryptedSharedPreferences.create(
-        "settings", MasterKeys.AES256_GCM_SPEC, context,
+        context, "settings", MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )

@@ -10,7 +10,7 @@ object StandardSmsSource {
         val sender = messages.first().originatingAddress ?: return null
         val body = messages.joinToString("") { it.messageBody ?: "" }
         val timestamp = messages.minOf { it.timestampMillis }
-        val subscription = intent.extras?.getInt(Telephony.Sms.Intents.EXTRA_SUBSCRIPTION_INDEX, -1)?.takeIf { it >= 0 }
+        val subscription = intent.extras?.getInt("subscription", -1)?.takeIf { it >= 0 }
         return SmsMessageData("broadcast", sender, body, timestamp, subscription)
     }
 }
