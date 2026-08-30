@@ -187,6 +187,9 @@ start_mailpilot() {
             exit 1
         }
         echo "[INFO] 未找到 mailpilot，正在从仓库源码构建"
+        # Servers in mainland China may not reach proxy.golang.org reliably.
+        # Respect an explicit GOPROXY, otherwise use the domestic mirror.
+        export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
         (cd "${ROOT_DIR}/mailpilot" && go build -o "${binary}" .)
     fi
     echo "[INFO] 启动 MailPilot daemon，配置: ${config_file}"
