@@ -10,6 +10,7 @@ from core.api.vision_handler import VisionHandler
 from core.desktop_control import DesktopControl
 from core.notification_hub import WindowsNotificationHub
 from core.mailpilot_webhook import MailPilotWebhookHandler
+from core.sms_webhook import SmsWebhookHandler
 
 TAG = __name__
 
@@ -28,6 +29,7 @@ class SimpleHttpServer:
         self.desktop_control = DesktopControl(config, self.logger)
         self.notification_hub = WindowsNotificationHub(config, self.logger, self.deliver_notification)
         self.mailpilot_webhook = None
+        self.sms_webhook = None
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -61,6 +63,8 @@ class SimpleHttpServer:
                     self.mailpilot_webhook = MailPilotWebhookHandler(self.config, qq_service)
                     app.router.add_post("/webhook/mailpilot", self.mailpilot_webhook.handle)
                     app.router.add_post("/webhook/mailpilot/{token}", self.mailpilot_webhook.handle)
+                    self.sms_webhook = SmsWebhookHandler(self.config, qq_service, self.logger)
+                    app.router.add_post("/api/events/sms", self.sms_webhook.handle)
 
                 if not read_config_from_api:
                     # 如果没有开启智控台，只是单模块运行，就需要再添加简单OTA接口，用于下发websocket接口

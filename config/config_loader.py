@@ -51,6 +51,11 @@ async def load_config():
         mailpilot["webhook_secret"] = os.environ["MAILPILOT_WEBHOOK_SECRET"]
     if os.environ.get("MAILPILOT_TARGET_QQ"):
         mailpilot["target_qq"] = os.environ["MAILPILOT_TARGET_QQ"]
+    sms = config.setdefault("sms", {})
+    if os.environ.get("SMS_WEBHOOK_TOKEN"):
+        sms["webhook_token"] = os.environ["SMS_WEBHOOK_TOKEN"]
+    if os.environ.get("SMS_TARGET_QQ"):
+        sms["target_qq"] = os.environ["SMS_TARGET_QQ"]
     # 初始化目录
     ensure_directories(config)
 

@@ -65,6 +65,14 @@ qq:
   allowed_groups: []
   max_message_length: 4000
 
+# Android SMS webhook. The target falls back to qq.owner_qq when empty.
+# Prefer setting SMS_WEBHOOK_TOKEN and SMS_TARGET_QQ in the server environment.
+sms:
+  webhook_token: ""
+  target_qq: ""
+  dedup_ttl_seconds: 86400
+  dedup_cache_size: 5000
+
 # MailPilot only posts analyzed events here; the request cannot choose a QQ.
 # Prefer MAILPILOT_WEBHOOK_SECRET and MAILPILOT_TARGET_QQ environment variables.
 mailpilot:
