@@ -1,0 +1,25 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout android:orientation="vertical" android:padding="24dp"
+        android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:text="SMS Bridge" android:textSize="28sp" android:textStyle="bold"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <EditText android:id="@+id/controllerUrl" android:hint="Controller URL"
+            android:inputType="textUri" android:layout_marginTop="20dp"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <EditText android:id="@+id/token" android:hint="Token" android:inputType="textPassword"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Spinner android:id="@+id/mode" android:layout_marginTop="12dp"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Button android:id="@+id/save" android:text="保存并启用监听"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Button android:id="@+id/testConnection" android:text="测试中控"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Button android:id="@+id/requestSms" android:text="请求短信权限"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Button android:id="@+id/requestRoot" android:text="请求 Root 权限"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/status" android:textSize="16sp" android:lineSpacingExtra="6dp"
+            android:layout_marginTop="18dp" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    </LinearLayout>
+</ScrollView>
