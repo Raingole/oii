@@ -13,6 +13,8 @@
             android:layout_width="match_parent" android:layout_height="wrap_content" />
         <Button android:id="@+id/save" android:text="保存并启用监听"
             android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <Button android:id="@+id/stop" android:text="停止监听"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
         <Button android:id="@+id/testConnection" android:text="测试中控"
             android:layout_width="match_parent" android:layout_height="wrap_content" />
         <Button android:id="@+id/requestSms" android:text="请求短信权限"

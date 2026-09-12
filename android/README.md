@@ -1,8 +1,8 @@
 # SMS Bridge
 
-独立 Kotlin Android App：标准 `SMS_RECEIVED` 广播优先，Root fallback 通过只读
-`su -c 'content query --uri content://sms/inbox ...'` 查询最近收件箱短信。两条路径都
-进入同一个 SHA-256 event ID 和 SQLite 队列，不会重复向中控发送。
+独立 Kotlin Android App + KernelSU `service.d` Root shell daemon。长期监听由
+`/data/adb/service.d/sms-bridge.sh` 完成，使用只读 `content query` 查询短信；APK
+只负责配置、安装/启停 daemon 和查看状态。
 
 ## 构建
 
@@ -28,8 +28,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - Token：填写中控 `data/.config.yaml` 中的 SMS webhook token；App 使用
   Android Keystore 加密保存
 
-然后请求短信权限并点击“保存并启用监听”。Root fallback 选择“标准 SMS + Root
-fallback”后请求 Root；不会修改短信数据库、SELinux、AppOps 或短信应用。
+点击“保存并启用监听”后，APK 通过 `su` 安装并启动 daemon；不会修改短信数据库、
+SELinux、AppOps 或短信应用。
 
 ## 行为
 
