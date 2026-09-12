@@ -12,7 +12,7 @@
 - MCP 能力：支持 WebSocket MCP 服务和 MCP 聚合器，可扩展天气、新闻、路线、餐厅等工具。
 - 长期记忆：支持服务端记忆后端，并支持 QQ / ESP 用户身份映射。
 - 辅助服务：OTA、视觉分析、短信验证码和邮件验证码通知。
-
+未来还可能加入灯舵机，投影等高级控件
 ## 架构
 
 ```mermaid
@@ -31,7 +31,7 @@ flowchart LR
 ```
 
 QQ 入口只负责平台协议适配，业务处理统一进入 `QQAgent` 和公共 Agent Pipeline。这样 NapCat 和 QQ 官方机器人可以作为两个独立入口，共用相同的记忆、MCP 和功能。
-
+私人项目 部署的时候自己调成公共  比如memory系统的id  或者esp控件的mac  都是用于私人 做人物
 ## 启动
 
 ```bash
@@ -126,30 +126,6 @@ ws://服务器地址:8005/api/desktop
 C:\Users\你的用户名\AppData\Local\XiaozhiDesktopControl\config.json
 ```
 
-## 桌面控制 Debug
-
-测试消息：
-
-```text
-请调用电脑控制功能，打开计算器
-```
-
-日志链路：
-
-```text
-QQ pipeline dispatch
-QQ agent start
-Pipeline route=desktop_direct
-Tool execution start: name=open_desktop_app
-desktop command sent: clients=1
-桌面插件执行结果: ok
-Tool execution finish
-QQ agent finish
-QQ pipeline completed
-```
-
-根据缺失的日志阶段，可以判断问题发生在消息接收、工具调用、桌面命令发送或 Windows 客户端执行环节。
-
 ## 更新
 
 ```bash
@@ -172,13 +148,6 @@ OII 是一个个人智能中控，不是单一聊天机器人。它把消息入�
 - 使用邮件和短信通知将验证码发送到 QQ；
 - 让 NapCat 和 QQ 官方机器人作为两个独立的备用入口。
 
-## 设计原则
-
-### 统一 Agent
-
-NapCat、QQ 官方机器人和小智设备不会各自维护一套业务逻辑，而是进入同一个 Agent Pipeline。模型、工具、MCP 和记忆服务集中管理，降低多入口之间的行为差异。
-
-### 渠道与业务解耦
 
 QQ 适配器只负责接收和发送消息；真正的对话、记忆、工具调用由 `QQAgent` 和公共 Pipeline 处理。新增消息平台时，可以复用已有业务能力。
 
@@ -216,24 +185,6 @@ NapCat OneBot connected
 
 如果使用 QQ 官方机器人，应看到官方 Gateway 连接成功相关日志。
 
-## 开发与贡献
-
-建议在提交代码前运行：
-
-```bash
-python -m compileall -q core qq
-python -m unittest discover -s tests -p "test_*.py"
-git diff --check
-```
-
-提交 Pull Request 时，请说明：
-
-- 修改了哪个消息入口或服务；
-- 是否改变了配置字段或端口；
-- 是否影响 NapCat、QQ 官方机器人或小智设备；
-- 是否增加了新的依赖；
-- 如何复现和验证功能。
-
 ## 版本更新
 
 ```bash
@@ -241,12 +192,3 @@ git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt
 ./setup-and-start.sh
-```
-
-生产环境更新前建议备份：
-
-```bash
-cp data/.config.yaml data/.config.yaml.backup
-```
-
-不要使用 `git clean` 或覆盖操作删除 `data/`，其中可能包含本地配置、记忆和运行数据。
