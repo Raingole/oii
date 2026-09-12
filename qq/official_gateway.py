@@ -26,6 +26,7 @@ class QQOfficialGateway:
         self.stop_event = asyncio.Event()
         self.websocket = None
         self.access_token = ""
+        self.sequence = None
         self._heartbeat_task = None
         self._send_lock = asyncio.Lock()
 
@@ -89,6 +90,9 @@ class QQOfficialGateway:
                 hello = json.loads(await websocket.recv())
                 if hello.get("op") != 10:
                     raise RuntimeError(f"unexpected gateway hello: {hello.get('op')}")
+                self.logger.bind(tag=__name__).info(
+                    f"QQ Official Bot Gateway hello: heartbeat_interval={hello.get('d', {}).get('heartbeat_interval')}"
+                )
                 self._heartbeat_task = asyncio.create_task(
                     self._heartbeat(websocket, hello.get("d", {}).get("heartbeat_interval", 45000))
                 )
@@ -103,8 +107,20 @@ class QQOfficialGateway:
                 }))
                 async for raw in websocket:
                     packet = json.loads(raw)
+                    if packet.get("s") is not None:
+                        self.sequence = packet["s"]
                     if packet.get("op") == 0:
+                        if packet.get("t") == "READY":
+                            self.logger.bind(tag=__name__).info("QQ Official Bot Gateway ready")
                         await self._handle_dispatch(packet.get("t"), packet.get("d") or {})
+                    elif packet.get("op") == 1:
+                        await websocket.send(json.dumps({"op": 1, "d": self.sequence}))
+                    elif packet.get("op") == 7:
+                        raise RuntimeError("QQ Gateway requested reconnect")
+                    elif packet.get("op") == 9:
+                        raise RuntimeError("QQ Gateway rejected session")
+                    elif packet.get("op") == 11:
+                        self.logger.bind(tag=__name__).debug("QQ Official Bot heartbeat acknowledged")
             finally:
                 if self._heartbeat_task:
                     self._heartbeat_task.cancel()
@@ -115,7 +131,7 @@ class QQOfficialGateway:
     async def _heartbeat(self, websocket, interval_ms: int) -> None:
         while True:
             await asyncio.sleep(max(1, interval_ms / 1000))
-            await websocket.send(json.dumps({"op": 1, "d": None}))
+            await websocket.send(json.dumps({"op": 1, "d": self.sequence}))
 
     async def _handle_dispatch(self, event_type: str | None, data: dict) -> None:
         if event_type != "C2C_MESSAGE_CREATE":
@@ -139,13 +155,19 @@ class QQOfficialGateway:
             raise RuntimeError("QQ Official Bot access token is unavailable")
         headers = {"Authorization": f"QQBot {self.access_token}", "Content-Type": "application/json"}
         async with self._send_lock:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.API_BASE}/v2/users/{user_openid}/messages",
-                    headers=headers,
-                    json={"content": str(text)[:4000], "msg_type": 0, "msg_id": message_id},
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as response:
-                    if response.status >= 400:
+            for attempt in range(2):
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.API_BASE}/v2/users/{user_openid}/messages",
+                        headers=headers,
+                        json={"content": str(text)[:4000], "msg_type": 0, "msg_id": message_id},
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as response:
+                        if response.status < 400:
+                            return
                         body = await response.text()
+                        if response.status == 401 and attempt == 0:
+                            _, self.access_token = await self._get_gateway_url()
+                            headers["Authorization"] = f"QQBot {self.access_token}"
+                            continue
                         raise RuntimeError(f"QQ Official Bot send failed: HTTP {response.status} {body[:200]}")
