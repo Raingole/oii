@@ -65,6 +65,16 @@ qq:
   allowed_groups: []
   max_message_length: 4000
 
+# Native QQ Official Bot connection. Credentials may be supplied by env vars.
+qq_official:
+  enabled: false
+  app_id: ""
+  app_secret: ""
+  # Set to the NapCat QQ number to share the same memory session.
+  memory_identity: ""
+  # C2C private-message intent.
+  intents: 33554432
+
 # Android SMS webhook. The target falls back to qq.owner_qq when empty.
 # Prefer setting SMS_WEBHOOK_TOKEN and SMS_TARGET_QQ in the server environment.
 sms:

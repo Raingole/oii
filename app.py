@@ -11,6 +11,7 @@ from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
 from qq.gateway import QQGateway
+from qq.official_gateway import QQOfficialGateway
 
 TAG = __name__
 logger = setup_logging()
@@ -78,7 +79,9 @@ async def main():
     ws_server.desktop_control = ota_server.desktop_control
     ota_task = asyncio.create_task(ota_server.start())
     qq_gateway = QQGateway(config, ws_server._llm, controller=ws_server)
+    qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     qq_task = asyncio.create_task(qq_gateway.start())
+    qq_official_task = asyncio.create_task(qq_official_gateway.start())
 
     read_config_from_api = config.get("read_config_from_api", False)
     port = int(config["server"].get("http_port", 8003))
@@ -146,11 +149,13 @@ async def main():
         if ota_task:
             ota_task.cancel()
         qq_task.cancel()
+        qq_official_task.cancel()
         await qq_gateway.close()
+        await qq_official_gateway.close()
 
         # 等待任务终止（必须加超时）
         await asyncio.wait(
-            [stdin_task, ws_task, ota_task, qq_task] if ota_task else [stdin_task, ws_task, qq_task],
+            [stdin_task, ws_task, ota_task, qq_task, qq_official_task] if ota_task else [stdin_task, ws_task, qq_task, qq_official_task],
             timeout=3.0,
             return_when=asyncio.ALL_COMPLETED,
         )
