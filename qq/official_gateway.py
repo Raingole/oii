@@ -66,7 +66,10 @@ class QQOfficialGateway:
                 token = await response.json(content_type=None)
                 if response.status >= 400 or not token.get("access_token"):
                     raise RuntimeError(f"access token failed: HTTP {response.status}")
-            headers = {"Authorization": f"Bot {self.app_id}.{token['access_token']}"}
+            headers = {
+                "Authorization": f"QQBot {token['access_token']}",
+                "User-Agent": "oii-qq-official-gateway/1.0",
+            }
             async with session.get(
                 f"{self.API_BASE}/gateway/bot",
                 headers=headers,
