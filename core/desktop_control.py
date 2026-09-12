@@ -22,6 +22,7 @@ class DesktopControl:
 
     async def handle_websocket(self, request: web.Request) -> web.StreamResponse:
         if not self.authenticate(request):
+            self.logger.bind(tag="desktop_control").warning("desktop WebSocket authentication failed")
             return web.json_response({"ok": False, "error": "桌面插件认证失败"}, status=401)
 
         websocket = web.WebSocketResponse(heartbeat=30)
@@ -50,6 +51,9 @@ class DesktopControl:
 
     async def open_app(self, target: str, url: str = "", path: str = "", name: str = "") -> dict[str, Any]:
         if not self.clients:
+            self.logger.bind(tag="desktop_control").warning(
+                f"desktop command skipped: no clients, target={target}, name={name}"
+            )
             return {"ok": False, "error": "没有在线的桌面插件"}
         command = {
             "type": "desktop_command",
@@ -70,6 +74,9 @@ class DesktopControl:
                 sent += 1
             except Exception:
                 self.clients.discard(websocket)
+        self.logger.bind(tag="desktop_control").info(
+            f"desktop command sent: command_id={command['command_id']}, target={target}, name={name}, clients={sent}"
+        )
         if sent == 0:
             return {"ok": False, "error": "桌面插件连接已失效"}
         return {"ok": True, "target": target, "url": url}

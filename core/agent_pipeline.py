@@ -1,11 +1,13 @@
 """Shared text Agent pipeline for channel adapters."""
 
 import asyncio
+import json
 from typing import Any
 
 from config.logger import setup_logging
 from core.utils.dialogue import Message
 from core.handle.intentHandler import detect_air_conditioner_request
+from core.utils.desktop_intent import detect_desktop_open
 from plugins_func.register import Action
 
 TAG = __name__
@@ -36,7 +38,25 @@ class AgentPipeline:
                 getattr(context, "turn_id", "qq"),
             )
         try:
-            answer = await self._turn(context, session_id, int(self.config.get("tool_call_max_depth", 5)))
+            desktop_name = detect_desktop_open(query)
+            if desktop_name and getattr(context, "func_handler", None):
+                self.logger.bind(tag=TAG).info(f"Pipeline route=desktop_direct: session={session_id}, tool=open_desktop_app")
+                result = await context.func_handler.handle_llm_function_call(
+                    context,
+                    {
+                        "id": f"desktop-{session_id}",
+                        "name": "open_desktop_app",
+                        "arguments": json.dumps(
+                            {"target": "application", "name": desktop_name},
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+                answer = result.response or result.result or ""
+                self.logger.bind(tag=TAG).info(f"Pipeline desktop tool completed: session={session_id}, action={getattr(result, 'action', 'unknown')}")
+            else:
+                self.logger.bind(tag=TAG).info(f"Pipeline route=llm: session={session_id}, desktop_direct={'no' if not desktop_name else 'unavailable'}")
+                answer = await self._turn(context, session_id, int(self.config.get("tool_call_max_depth", 5)))
         except Exception as exc:
             self.logger.bind(tag=TAG).error(f"Agent pipeline failed: {exc}")
             context.dialogue.dialogue.pop()

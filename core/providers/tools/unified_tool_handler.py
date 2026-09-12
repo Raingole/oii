@@ -197,8 +197,15 @@ class UnifiedToolHandler:
                 arguments = memory_manager.apply_defaults(
                     function_name, arguments, getattr(self.conn, "current_user_query", "")
                 )
+            self.logger.info(
+                f"Tool execution start: name={function_name}, session={getattr(conn, 'session_id', '')}"
+            )
             result = await self.tool_manager.execute_tool(function_name, arguments)
             self._remember_tool_result(function_name, result, arguments)
+            self.logger.info(
+                f"Tool execution finish: name={function_name}, action={getattr(result, 'action', 'unknown')}, "
+                f"response_length={len(str(getattr(result, 'response', '') or ''))}"
+            )
             return result
 
         except Exception as e:

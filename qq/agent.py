@@ -93,6 +93,7 @@ class QQAgent:
         return session
 
     async def reply(self, session_key: str, text: str) -> str:
+        self.logger.bind(tag=TAG).info(f"QQ agent start: session={session_key}, text_length={len(text or '')}")
         await self.start()
         session = self._get_session(session_key)
         async with session.lock:
@@ -108,4 +109,5 @@ class QQAgent:
             self.context.func_handler.tool_manager.refresh_tools()
             answer = await self.pipeline.process(self.context, text, session_key)
             session.last_tool_result = self.context.last_tool_result
+            self.logger.bind(tag=TAG).info(f"QQ agent finish: session={session_key}, answer_length={len(answer or '')}")
             return answer
