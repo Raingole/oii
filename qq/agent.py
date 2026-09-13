@@ -2,12 +2,14 @@
 
 import asyncio
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from config.logger import setup_logging
 from core.agent_pipeline import AgentPipeline
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.utils.dialogue import Dialogue
+from jinja2 import Template
 
 TAG = __name__
 
@@ -63,10 +65,34 @@ class QQAgent:
         self.llm = llm
         self.logger = setup_logging(config)
         self.sessions: dict[str, QQConversation] = {}
-        self.prompt = str(config.get("prompt", ""))
+        self.prompt = self._build_prompt(str(config.get("prompt", "")))
         self.context: QQAgentContext | None = None
         self.pipeline = AgentPipeline(config)
         self.controller = controller
+
+    def _build_prompt(self, base_prompt: str) -> str:
+        """Apply the shared project prompt structure without rewriting the user's prompt."""
+        template_path = Path(str(self.config.get("prompt_template") or "agent-base-prompt.txt"))
+        if not template_path.is_absolute():
+            template_path = Path(__file__).resolve().parents[1] / template_path
+        try:
+            template = Template(template_path.read_text(encoding="utf-8"))
+            return template.render(
+                base_prompt=base_prompt,
+                language="中文",
+                current_time="",
+                today_date="",
+                today_weekday="",
+                lunar_date="",
+                local_address="",
+                weather_info="",
+                dynamic_context="",
+                emoji_enabled=False,
+                emojiList=[],
+            )
+        except (OSError, UnicodeError, ValueError) as exc:
+            self.logger.warning(f"QQ prompt template unavailable; using original prompt: {exc}")
+            return base_prompt
 
     async def start(self) -> None:
         if self.context is not None:
