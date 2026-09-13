@@ -396,6 +396,13 @@ class MemoryManager:
             context = self.tencent_backend.recall_for_turn(
                 user_id or self.owner_id, session_id, turn_id or "unknown", query
             )
+            # TencentDB's ordinary search is query-dependent.  Stable user
+            # preferences (reply style and durable avoid rules) must be
+            # injected independently, otherwise "reply briefly" is lost when
+            # the next query is about an unrelated topic.
+            local_preferences = self._learned_preference_prompt_v2(query)
+            if local_preferences:
+                context = f"{context}\n\n{local_preferences}" if context else local_preferences
             self._last_tencent_context[(user_id or self.owner_id, _text(query))] = context
             return context
         data = self.retrieve(user_id, channel, session_id, query)
@@ -419,6 +426,119 @@ class MemoryManager:
         if data.get("secret_names"):
             lines.append(f"- Secret names (values are never included): {', '.join(data['secret_names'])}")
         return "\n".join(lines)
+
+    def _learned_preference_prompt(self, query: str) -> str:
+        """Render high-confidence local preferences for every Tencent turn.
+
+        These are deliberately kept in the controller's SQLite store.  They
+        are small, explainable rules that should not depend on semantic recall
+        of the current question.
+        """
+        query_text = _text(query)
+        domain = self._domain(query_text)
+        preferences = self.get_preferences()
+        style = [item for item in preferences if item["domain"] == "response_style" and float(item["confidence"]) >= 0.62]
+        avoid = [
+            item for item in preferences
+            if item["domain"] == "avoid_recommendation"
+            and float(item["confidence"]) >= 0.62
+            and (domain == "food" or any(word in query_text for word in ("餐厅", "餐馆", "吃", "推荐", "饭")))
+        ]
+        if not style and not avoid:
+            return ""
+        lines = [
+            "[Stable User Preferences]",
+            "以下是从用户多轮对话中沉淀的偏好。仅在相关时遵守；当前明确要求优先。",
+        ]
+        for item in style[:8]:
+            lines.append(f"- 回答风格：{item['target']}（置信度 {float(item['confidence']):.2f}，证据 {item['evidence_count']} 次）")
+        for item in avoid[:12]:
+            lines.append(f"- 避免推荐：{item['target']}（置信度 {float(item['confidence']):.2f}，证据 {item['evidence_count']} 次）")
+        return "\n".join(lines)
+
+    def _learn_local_preferences(self, text: str, channel: str, session_id: str):
+        """Capture high-signal preferences without turning every opinion into a rule.
+
+        Explicit instructions start strong.  Implicit negative feedback starts
+        weaker and becomes durable only after repeated evidence.
+        """
+        text = _text(text).rstrip("。！!?？")
+        if not text:
+            return
+
+        style_rules = []
+        if re.search(r"(说话|回答|回复|讲)\\s*(多了少一点|少一点|简短一点|短一点|简单一点|别太长|不要太长)", text):
+            style_rules.append("回答尽量简短")
+        if re.search(r"(不要|别|不需要|无需).{0,8}(换行|分段)", text) or re.search(r"一段话(输出|回答)", text):
+            style_rules.append("默认使用一段话输出，不主动换行")
+        if re.search(r"(不要|别|不需要).{0,8}(列表|条目|markdown|格式)", text, re.I):
+            style_rules.append("默认使用自然段，不主动使用列表或复杂格式")
+        for rule in dict.fromkeys(style_rules):
+            self.update_preference("response_style", rule, {"kind": "long_term_instruction"}, channel, session_id, True, True)
+
+        # Explicit avoid requests are durable immediately; softer opinions are
+        # evidence only and need repetition before they become actionable.
+        avoid_match = re.search(
+            r"(?:不要|别|不再|不要再)(?:给我|向我)?(?:推荐|介绍)(?:这家|这间)?(.{1,32}?)(?:餐厅|餐馆|饭店)?$",
+            text,
+        )
+        if avoid_match:
+            target = avoid_match.group(1).strip(" ，,。！!?？") or "这家餐馆"
+            self.update_preference("avoid_recommendation", target, {"domain": "food", "kind": "explicit_avoid"}, channel, session_id, True, True)
+            return
+
+        soft_avoid = re.search(r"(这家|这间|这个地方).{0,16}(不好吃|难吃|不太好|一般|不喜欢|不想再去)", text)
+        if soft_avoid:
+            target = soft_avoid.group(1)
+            self.update_preference("avoid_recommendation", target, {"domain": "food", "kind": "repeated_negative_feedback"}, channel, session_id, True, False)
+
+    def _learned_preference_prompt_v2(self, query: str) -> str:
+        query_text = _text(query)
+        domain = self._domain(query_text)
+        preferences = self.get_preferences()
+        style = [p for p in preferences if p["domain"] == "response_style" and float(p["confidence"]) >= 0.62]
+        food_words = ("\u9910\u5385", "\u9910\u9986", "\u5403", "\u63a8\u8350", "\u996d")
+        avoid = [
+            p for p in preferences
+            if p["domain"] == "avoid_recommendation"
+            and float(p["confidence"]) >= 0.62
+            and (domain == "food" or any(word in query_text for word in food_words))
+        ]
+        if not style and not avoid:
+            return ""
+        lines = [
+            "[Stable User Preferences]",
+            "\u4ee5\u4e0b\u662f\u4ece\u7528\u6237\u591a\u8f6e\u5bf9\u8bdd\u4e2d\u6c89\u6dc0\u7684\u504f\u597d\u3002\u4ec5\u5728\u76f8\u5173\u65f6\u9075\u5b88\uff1b\u5f53\u524d\u660e\u786e\u8981\u6c42\u4f18\u5148\u3002",
+        ]
+        for item in style[:8]:
+            lines.append(f"- \u56de\u7b54\u98ce\u683c：{item['target']}（\u7f6e\u4fe1\u5ea6 {float(item['confidence']):.2f}，\u8bc1\u636e {item['evidence_count']} \u6b21）")
+        for item in avoid[:12]:
+            lines.append(f"- \u907f\u514d\u63a8\u8350：{item['target']}（\u7f6e\u4fe1\u5ea6 {float(item['confidence']):.2f}，\u8bc1\u636e {item['evidence_count']} \u6b21）")
+        return "\n".join(lines)
+
+    def _learn_local_preferences_v2(self, text: str, channel: str, session_id: str):
+        text = _text(text).rstrip("\u3002\uff01!?\uff1f")
+        if not text:
+            return
+        style_rules = []
+        if re.search(r"(\u8bf4\u8bdd|\u56de\u7b54|\u56de\u590d|\u8bb2)\s*(\u591a\u4e86\u5c11\u4e00\u70b9|\u5c11\u4e00\u70b9|\u7b80\u77ed\u4e00\u70b9|\u77ed\u4e00\u70b9|\u7b80\u5355\u4e00\u70b9|\u522b\u592a\u957f|\u4e0d\u8981\u592a\u957f)", text):
+            style_rules.append("\u56de\u7b54\u5c3d\u91cf\u7b80\u77ed")
+        if re.search(r"(\u4e0d\u8981|\u522b|\u4e0d\u9700\u8981|\u65e0\u9700).{0,8}(\u6362\u884c|\u5206\u6bb5)", text) or re.search(r"\u4e00\u6bb5\u8bdd(\u8f93\u51fa|\u56de\u7b54)", text):
+            style_rules.append("\u9ed8\u8ba4\u4f7f\u7528\u4e00\u6bb5\u8bdd\u8f93\u51fa\uff0c\u4e0d\u4e3b\u52a8\u6362\u884c")
+        if re.search(r"(\u4e0d\u8981|\u522b|\u4e0d\u9700\u8981).{0,8}(\u5217\u8868|\u6761\u76ee|markdown|\u683c\u5f0f)", text, re.I):
+            style_rules.append("\u9ed8\u8ba4\u4f7f\u7528\u81ea\u7136\u6bb5\uff0c\u4e0d\u4e3b\u52a8\u4f7f\u7528\u5217\u8868\u6216\u590d\u6742\u683c\u5f0f")
+        for rule in dict.fromkeys(style_rules):
+            self.update_preference("response_style", rule, {"kind": "long_term_instruction"}, channel, session_id, True, True)
+
+        avoid_match = re.search(
+            r"(?:\u4e0d\u8981|\u522b|\u4e0d\u518d|\u4e0d\u8981\u518d)(?:\u7ed9\u6211|\u5411\u6211)?(?:\u63a8\u8350|\u4ecb\u7ecd)(?:\u8fd9\u5bb6|\u8fd9\u95f4)?(.{1,32}?)(?:\u9910\u5385|\u9910\u9986|\u996d\u5e97)?$", text)
+        if avoid_match:
+            target = avoid_match.group(1).strip(" \uFF0C,\u3002\uFF01!?\uFF1F") or "\u8fd9\u5bb6\u9910\u9986"
+            self.update_preference("avoid_recommendation", target, {"domain": "food", "kind": "explicit_avoid"}, channel, session_id, True, True)
+            return
+        soft_avoid = re.search(r"(\u8fd9\u5bb6|\u8fd9\u95f4|\u8fd9\u4e2a\u5730\u65b9).{0,16}(\u4e0d\u597d\u5403|\u96be\u5403|\u4e0d\u592a\u597d|\u4e00\u822c|\u4e0d\u559c\u6b22|\u4e0d\u60f3\u518d\u53bb)", text)
+        if soft_avoid:
+            self.update_preference("avoid_recommendation", soft_avoid.group(1), {"domain": "food", "kind": "repeated_negative_feedback"}, channel, session_id, True, False)
 
     def remember_fact(self, subject: str, predicate: str, obj: str, channel: str, session_id: str, source_type: str = "explicit", confidence: float = 1.0):
         now = _now()
@@ -471,6 +591,7 @@ class MemoryManager:
         if not target:
             return
         context_json = _json(context or {})
+        soft_negative = (not explicit) and (context or {}).get("kind") == "repeated_negative_feedback"
         delta = 0.25 if explicit else 0.12
         if not positive:
             delta = -0.25 if explicit else -0.12
@@ -483,13 +604,14 @@ class MemoryManager:
                 score = max(0.0, min(1.0, float(row["score"]) + delta))
                 db.execute(
                     "UPDATE memory_preferences SET score=?,confidence=?,evidence_count=?,positive_evidence=?,negative_evidence=?,source_channel=?,source_session=?,updated_at=? WHERE id=?",
-                    (score, min(1.0, float(row["confidence"]) + (0.04 if explicit else 0.01)), row["evidence_count"] + 1, row["positive_evidence"] + int(positive), row["negative_evidence"] + int(not positive), channel, session_id, _now(), row["id"]),
+                    (score, min(1.0, float(row["confidence"]) + (0.04 if explicit else (0.10 if soft_negative else 0.01))), row["evidence_count"] + 1, row["positive_evidence"] + int(positive), row["negative_evidence"] + int(not positive), channel, session_id, _now(), row["id"]),
                 )
                 return
+            initial_confidence = 0.45 if soft_negative else (1.0 if explicit else 0.65)
             score = max(0.0, min(1.0, 0.5 + delta))
             cursor = db.execute(
                 "INSERT INTO memory_preferences(user_id,domain,context_json,target,score,confidence,evidence_count,positive_evidence,negative_evidence,source_channel,source_session,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (self.owner_id, domain, context_json, target, score, 1.0 if explicit else 0.65, 1, int(positive), int(not positive), channel, session_id, "active", _now()),
+                (self.owner_id, domain, context_json, target, score, initial_confidence, 1, int(positive), int(not positive), channel, session_id, "active", _now()),
             )
             self._index(db, "preference", "memory_preferences", cursor.lastrowid, f"{domain} {target} {_json(context)}")
 
@@ -693,9 +815,11 @@ class MemoryManager:
 
     def observe_text(self, text: str, channel: str, session_id: str):
         """Promote only explicit, high-signal statements into long-term memory."""
+        self._learn_local_preferences_v2(text, channel, session_id)
         if self.using_tencent:
             # TencentDB extracts long-term atoms from committed conversations;
-            # do not duplicate the old local fact/profile pipeline.
+            # local preferences above provide a deterministic, query-independent
+            # policy layer while TencentDB continues extracting richer atoms.
             return
         text = _text(text).rstrip("\u3002\uff01\uff1f!?\u3002")
         if not text:

@@ -126,6 +126,25 @@ class TencentMemoryAdapter(MemoryService):
         started = time.perf_counter()
         try:
             scope = self._scope(user_id)
+            # The official prefetch endpoint combines L1 recall with L3
+            # persona/instruction context.  Prefer it so stable user profile
+            # data is available even when the current query is unrelated.
+            try:
+                recall_data = self._post(
+                    "/recall",
+                    {"query": query, "session_key": session_id},
+                    self.recall_timeout,
+                    user_id=user_id,
+                )
+                recalled_context = _as_text(recall_data.get("context"))
+                if recalled_context:
+                    self.logger.bind(tag=TAG).info(
+                        f"[Memory][user={user_id}][session={session_id}][turn={turn_id}] official recall success latency={int((time.perf_counter()-started)*1000)}ms"
+                    )
+                    return recalled_context
+            except Exception as exc:
+                self.logger.bind(tag=TAG).debug(f"[Memory] official recall unavailable, using v2 search fallback: {exc}")
+
             with ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory-recall") as pool:
                 atomic_future = pool.submit(
                     self._post, "/v2/atomic/search",
