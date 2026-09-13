@@ -1,87 +1,54 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#080b12" />
-    <title>oii · 语音使用指南</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <div class="page-noise" aria-hidden="true"></div>
-    <header class="site-header">
-      <a class="brand" href="#top" aria-label="oii 首页"><span>o</span>ii</a>
-      <nav class="nav-links" aria-label="主导航">
-        <a class="active" href="#top">首页</a>
-        <a href="#how-it-works">使用指南</a>
-        <a href="#examples">试试这样说</a>
-      </nav>
-      <a class="header-action" href="#how-it-works">开始使用 <span>↘</span></a>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#eef3f8" />
+  <title>模拟 QQ · 中控助手</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="login-view" id="loginView">
+    <div class="login-art"><div class="qq-orb">Q</div><span class="spark s1">✦</span><span class="spark s2">✦</span></div>
+    <div class="login-panel">
+      <div class="wordmark"><span class="qq-mark">Q</span><span>模拟 QQ</span></div>
+      <h1>连接你的中控</h1>
+      <p class="lead">这是一个本地模拟 QQ 端。输入 user 和对应 QQ 号，消息会直接进入中控对话。</p>
+      <form id="loginForm">
+        <label>user 名称<input id="username" name="username" autocomplete="username" placeholder="例如：我的私人账号" required minlength="2" maxlength="24" /></label>
+        <label>关联 QQ 号<input id="qqId" name="qq_id" inputmode="numeric" placeholder="私人账号请输入 2496303940" required pattern="[0-9]{5,14}" /></label>
+        <button class="primary-button" type="submit">进入模拟 QQ <span>→</span></button>
+      </form>
+      <p class="login-note"><span class="dot"></span> user 与 QQ 一对一绑定 · 数据隔离</p>
+      <div class="form-error" id="loginError" role="alert"></div>
+    </div>
+  </div>
+
+  <div class="app-view hidden" id="appView">
+    <header class="app-header">
+      <div class="wordmark"><span class="qq-mark">Q</span><span>模拟 QQ</span><small>· 中控助手</small></div>
+      <div class="header-user"><span class="online-dot"></span><span id="userDisplay"></span><button id="logoutButton" class="text-button">退出</button></div>
     </header>
-
-    <main id="top">
-      <section class="hero section-shell">
-        <div class="hero-copy">
-          <p class="eyebrow">你的语音助手</p>
-          <h1>让每一句话，<br /><em>都有回应</em></h1>
-          <p class="hero-subtitle">听见 · 理解 · 回应</p>
-          <button class="mic-button" id="micButton" type="button" aria-label="播放唤醒提示">
-            <span class="mic-ring"></span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg>
-          </button>
-          <span class="mic-label" id="micLabel">你好 oii</span>
+    <main class="workspace">
+      <aside class="guide-panel">
+        <div class="profile"><div class="avatar" id="avatarText">U</div><div><strong id="profileName">user</strong><small id="profileQq">QQ</small></div><span class="status-label">在线</span></div>
+        <div class="guide-heading"><span>⌁</span><div><strong>功能服务</strong><small>发送给中控的指令参考</small></div></div>
+        <div class="guide-list">
+          <button class="guide-item" data-command="今天广州天气怎么样？"><span class="guide-icon blue">☼</span><span><b>天气查询</b><small>今天广州天气怎么样？</small></span><i>→</i></button>
+          <button class="guide-item" data-command="打开微信"><span class="guide-icon violet">▣</span><span><b>电脑控制</b><small>打开微信 / 浏览器</small></span><i>→</i></button>
+          <button class="guide-item" data-command="帮我播放一首音乐"><span class="guide-icon pink">♫</span><span><b>音乐播放</b><small>播放、暂停或切换音乐</small></span><i>→</i></button>
+          <button class="guide-item" data-command="陪我聊聊天"><span class="guide-icon cyan">◌</span><span><b>自然对话</b><small>直接说出你的想法</small></span><i>→</i></button>
         </div>
-        <div class="orb-stage" aria-hidden="true">
-          <div class="orb-glow"></div>
-          <div class="orb orb-one"></div>
-          <div class="orb orb-two"></div>
-          <div class="orb-core"></div>
-          <div class="wave wave-a"></div>
-          <div class="wave wave-b"></div>
-          <div class="wave wave-c"></div>
-          <div class="orb-stars"></div>
-        </div>
-      </section>
-
-      <section class="steps section-shell" id="how-it-works">
-        <article class="step">
-          <span class="step-number">1</span><div class="step-icon">⌁</div>
-          <div><h2>唤醒 oii</h2><p>说“你好 oii”<br />唤醒你的语音助手</p></div>
-        </article>
-        <div class="step-arrow">›</div>
-        <article class="step">
-          <span class="step-number">2</span><div class="step-icon">◌</div>
-          <div><h2>说出你的想法</h2><p>用自然的语言提问或表达需求，<br />oii 会认真听懂</p></div>
-        </article>
-        <div class="step-arrow">›</div>
-        <article class="step">
-          <span class="step-number purple">3</span><div class="step-icon purple-text">⌁</div>
-          <div><h2>oii 为你回应</h2><p>听见 · 理解 · 回应，<br />提供准确又贴心的帮助</p></div>
-        </article>
-      </section>
-
-      <section class="examples section-shell" id="examples">
-        <div class="section-title"><span class="title-wave">···</span><h2>oii 现在会这些</h2><span class="title-wave purple-wave">···</span></div>
-        <p class="section-intro">直接说出你的需求，oii 会听懂并帮你完成。</p>
-        <div class="example-grid">
-          <button class="example-card" type="button" data-command="陪我聊聊天"><span class="example-icon cyan">◌</span><span>“陪我聊聊天”</span><small>自然对话</small><i></i></button>
-          <button class="example-card" type="button" data-command="今天广州天气怎么样？"><span class="example-icon blue">☁</span><span>“今天广州天气怎么样？”</span><small>天气查询</small><i></i></button>
-          <button class="example-card" type="button" data-command="从天河到珠江新城怎么走？"><span class="example-icon violet">⌖</span><span>“从天河到珠江新城怎么走？”</span><small>高德地图查询</small><i></i></button>
-          <button class="example-card" type="button" data-command="附近有什么好吃的？"><span class="example-icon pink">◇</span><span>“附近有什么好吃的？”</span><small>周边食物查询</small><i></i></button>
-          <button class="example-card" type="button" data-command="帮我找附近评分高的咖啡店"><span class="example-icon cyan">☆</span><span>“找附近评分高的咖啡店”</span><small>周边店铺评分</small><i></i></button>
-          <button class="example-card" type="button" data-command="打开微信"><span class="example-icon blue">▣</span><span>“打开微信”</span><small>电脑打开软件</small><i></i></button>
-          <button class="example-card" type="button" data-command="打开浏览器搜索今天的新闻"><span class="example-icon violet">↗</span><span>“打开浏览器搜新闻”</span><small>电脑打开浏览器</small><i></i></button>
-        </div>
+        <div class="privacy-box"><span>⌘</span><div><b>会话隔离</b><small>当前 user 的消息使用独立上下文。私人 QQ 才会接入你的个人记忆。</small></div></div>
+      </aside>
+      <section class="chat-panel">
+        <div class="chat-top"><div><h1>中控助手</h1><p><span class="online-dot"></span> 已连接 · 可以开始发送指令</p></div><span class="shield">⌾ 安全通道</span></div>
+        <div class="messages" id="messages"><div class="welcome"><div class="welcome-mark">Q</div><h2>你好，<span id="welcomeName">user</span></h2><p>我是你的中控助手。你可以像发 QQ 消息一样，直接告诉我想做什么。</p><div class="welcome-line"></div></div></div>
+        <form class="composer" id="messageForm"><textarea id="messageInput" rows="1" maxlength="4000" placeholder="输入消息，或点击左侧功能…"></textarea><div class="composer-footer"><span id="charCount">0 / 4000</span><span class="hint">Enter 发送 · Shift + Enter 换行</span><button class="send-button" type="submit" aria-label="发送">↑</button></div></form>
       </section>
     </main>
-
-    <footer class="site-footer section-shell">
-      <a class="brand footer-brand" href="#top"><span>o</span>ii</a>
-      <p>用声音连接你我，让生活更简单。</p>
-      <div class="footer-links"><a href="#how-it-works">使用说明</a><a href="#examples">示例</a><a href="#top">回到顶部</a></div>
-      <small>© 2026 oii</small>
-    </footer>
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="/app.js"></script>
-  </body>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+  <script src="/app.js"></script>
+</body>
 </html>

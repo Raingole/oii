@@ -79,6 +79,7 @@ async def main():
     ws_server.desktop_control = ota_server.desktop_control
     ota_task = asyncio.create_task(ota_server.start())
     qq_gateway = QQGateway(config, ws_server._llm, controller=ws_server)
+    ws_server.qq_gateway = qq_gateway
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     qq_task = asyncio.create_task(qq_gateway.start())
     qq_official_task = asyncio.create_task(qq_official_gateway.start())

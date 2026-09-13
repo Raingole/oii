@@ -1,6 +1,11 @@
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import secrets
+import re
+import time
 from pathlib import Path
 from collections import deque
 from aiohttp import web
@@ -30,6 +35,9 @@ class SimpleHttpServer:
         self.notification_hub = WindowsNotificationHub(config, self.logger, self.deliver_notification)
         self.mailpilot_webhook = None
         self.sms_webhook = None
+        self.sim_qq_users_path = Path(__file__).resolve().parents[1] / "data" / "simulated_qq_users.json"
+        self.sim_qq_users_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sim_qq_users = self._load_sim_qq_users()
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -100,6 +108,10 @@ class SimpleHttpServer:
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
                         web.post("/api/cloud/push", self.handle_cloud_push),
+                        web.post("/api/sim-qq/login", self.handle_sim_qq_login),
+                        web.get("/api/sim-qq/session", self.handle_sim_qq_session),
+                        web.post("/api/sim-qq/message", self.handle_sim_qq_message),
+                        web.post("/api/sim-qq/logout", self.handle_sim_qq_logout),
                         web.get("/api/desktop", self.desktop_control.handle_websocket),
                         web.get("/api/desktop/", self.desktop_control.handle_websocket),
                         web.get("/ws/windows", self.notification_hub.handle_websocket),
@@ -133,6 +145,94 @@ class SimpleHttpServer:
 
     async def handle_ui_app(self, request):
         return web.FileResponse(Path(__file__).resolve().parents[1] / "ui" / "app.js")
+
+    def _load_sim_qq_users(self) -> dict:
+        try:
+            data = json.loads(self.sim_qq_users_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_sim_qq_users(self) -> None:
+        self.sim_qq_users_path.write_text(
+            json.dumps(self.sim_qq_users, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def _sim_cookie_secret(self) -> bytes:
+        return str(self.config.get("server", {}).get("auth_key", "sim-qq-local-secret")).encode()
+
+    def _sim_cookie_value(self, username: str, qq_id: str) -> str:
+        payload = f"{username}|{qq_id}"
+        signature = hmac.new(self._sim_cookie_secret(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+        return base64.urlsafe_b64encode(f"{payload}|{signature}".encode()).decode()
+
+    def _sim_identity(self, request):
+        raw = request.cookies.get("sim_qq_session", "")
+        try:
+            username, qq_id, signature = base64.urlsafe_b64decode(raw.encode()).decode().split("|", 2)
+        except (ValueError, UnicodeDecodeError, base64.binascii.Error):
+            return None
+        expected = hmac.new(self._sim_cookie_secret(), f"{username}|{qq_id}".encode(), hashlib.sha256).hexdigest()[:32]
+        if not hmac.compare_digest(signature, expected) or self.sim_qq_users.get(username) != qq_id:
+            return None
+        return {"username": username, "qq_id": qq_id, "is_owner": qq_id == self._owner_qq()}
+
+    def _owner_qq(self) -> str:
+        return str(self.config.get("qq", {}).get("owner_qq", "2496303940")).strip() or "2496303940"
+
+    async def handle_sim_qq_login(self, request):
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"ok": False, "error": "请求必须是 JSON"}, status=400)
+        username = str(payload.get("username", "")).strip()
+        qq_id = str(payload.get("qq_id", "")).strip()
+        if not re.fullmatch(r"[\w\u4e00-\u9fff-]{2,24}", username) or not re.fullmatch(r"\d{5,14}", qq_id):
+            return web.json_response({"ok": False, "error": "请输入 2-24 位 user 名称和有效 QQ 号"}, status=400)
+        existing_qq = self.sim_qq_users.get(username)
+        if existing_qq and existing_qq != qq_id:
+            return web.json_response({"ok": False, "error": "这个 user 已经绑定了另一个 QQ"}, status=409)
+        other_user = next((name for name, value in self.sim_qq_users.items() if value == qq_id and name != username), None)
+        if other_user:
+            return web.json_response({"ok": False, "error": f"这个 QQ 已绑定 user：{other_user}"}, status=409)
+        self.sim_qq_users[username] = qq_id
+        self._save_sim_qq_users()
+        identity = {"username": username, "qq_id": qq_id, "is_owner": qq_id == self._owner_qq()}
+        response = web.json_response({"ok": True, "identity": identity})
+        response.set_cookie("sim_qq_session", self._sim_cookie_value(username, qq_id), max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax")
+        return response
+
+    async def handle_sim_qq_session(self, request):
+        identity = self._sim_identity(request)
+        if not identity:
+            return web.json_response({"ok": False}, status=401)
+        return web.json_response({"ok": True, "identity": identity})
+
+    async def handle_sim_qq_message(self, request):
+        identity = self._sim_identity(request)
+        if not identity:
+            return web.json_response({"ok": False, "error": "请先登录模拟 QQ"}, status=401)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"ok": False, "error": "请求必须是 JSON"}, status=400)
+        text = str(payload.get("text", "")).strip()
+        if not text or len(text) > 4000:
+            return web.json_response({"ok": False, "error": "消息不能为空且不能超过 4000 字"}, status=400)
+        agent = getattr(getattr(self.websocket_server, "qq_gateway", None), "agent", None)
+        if agent is None:
+            agent = getattr(self.websocket_server, "qq_agent", None)
+        if agent is None:
+            return web.json_response({"ok": False, "error": "中控 Agent 尚未就绪"}, status=503)
+        # Owner uses the real private QQ identity; every other registration gets an isolated session.
+        session_key = f"qq:private:{self._owner_qq()}" if identity["is_owner"] else f"simqq:{identity['username']}:{identity['qq_id']}"
+        answer = await agent.reply(session_key, text)
+        return web.json_response({"ok": True, "answer": answer or "中控没有返回文字回复。", "identity": identity, "session": session_key})
+
+    async def handle_sim_qq_logout(self, request):
+        response = web.json_response({"ok": True})
+        response.del_cookie("sim_qq_session")
+        return response
 
     async def deliver_notification(self, text: str) -> bool:
         """Send text to the ESP board via server TTS; queue while offline."""

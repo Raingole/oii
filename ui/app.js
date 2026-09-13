@@ -1,28 +1,14 @@
-const toast = document.querySelector('#toast');
-const micButton = document.querySelector('#micButton');
-const micLabel = document.querySelector('#micLabel');
-let toastTimer;
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
-}
-
-micButton.addEventListener('click', () => {
-  micButton.classList.add('listening');
-  micLabel.textContent = '我认真听着呢，请讲';
-  showToast('唤醒词：你好 oii');
-  setTimeout(() => {
-    micButton.classList.remove('listening');
-    micLabel.textContent = '你好 oii';
-  }, 1800);
-});
-
-document.querySelectorAll('.example-card').forEach((card) => {
-  card.addEventListener('click', () => {
-    const command = card.dataset.command;
-    showToast(`可以对 oii 说：“${command}”`);
-  });
-});
+const $ = (id) => document.getElementById(id);
+const loginView = $('loginView'); const appView = $('appView');
+const input = $('messageInput'); const messages = $('messages'); let toastTimer;
+function showToast(text) { const el = $('toast'); el.textContent = text; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600); }
+function setIdentity(identity) { $('userDisplay').textContent = `${identity.username} · QQ ${identity.qq_id}`; $('profileName').textContent = identity.username; $('profileQq').textContent = `QQ ${identity.qq_id}${identity.is_owner ? ' · 私人账号' : ' · 独立 user'}`; $('avatarText').textContent = identity.username.slice(0, 1).toUpperCase(); $('welcomeName').textContent = identity.username; loginView.classList.add('hidden'); appView.classList.remove('hidden'); input.focus(); }
+function addMessage(text, type) { const row = document.createElement('div'); row.className = `message-row ${type}`; const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = text; row.appendChild(bubble); messages.appendChild(row); messages.scrollTop = messages.scrollHeight; }
+async function post(url, body) { const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); const data = await res.json(); if (!res.ok) throw new Error(data.error || '请求失败'); return data; }
+$('loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const button = event.target.querySelector('button'); $('loginError').textContent = ''; button.disabled = true; try { const data = await post('/api/sim-qq/login', { username: $('username').value.trim(), qq_id: $('qqId').value.trim() }); setIdentity(data.identity); } catch (error) { $('loginError').textContent = error.message; } finally { button.disabled = false; } });
+$('logoutButton').addEventListener('click', async () => { await post('/api/sim-qq/logout', {}); location.reload(); });
+document.querySelectorAll('.guide-item').forEach((button) => button.addEventListener('click', () => { input.value = button.dataset.command; input.dispatchEvent(new Event('input')); input.focus(); }));
+input.addEventListener('input', () => { $('charCount').textContent = `${input.value.length} / 4000`; input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 150)}px`; });
+input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('messageForm').requestSubmit(); } });
+$('messageForm').addEventListener('submit', async (event) => { event.preventDefault(); const text = input.value.trim(); if (!text) return; addMessage(text, 'outgoing'); input.value = ''; input.dispatchEvent(new Event('input')); const pending = document.createElement('div'); pending.className = 'message-row incoming'; pending.innerHTML = '<div class="bubble pending"><span></span><span></span><span></span></div>'; messages.appendChild(pending); messages.scrollTop = messages.scrollHeight; try { const data = await post('/api/sim-qq/message', { text }); pending.remove(); addMessage(data.answer, 'incoming'); } catch (error) { pending.remove(); addMessage(`发送失败：${error.message}`, 'incoming error'); showToast(error.message); } });
+(async () => { try { const res = await fetch('/api/sim-qq/session'); if (res.ok) setIdentity((await res.json()).identity); } catch (_) {} })();
