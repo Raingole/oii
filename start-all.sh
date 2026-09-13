@@ -147,7 +147,12 @@ start_mcp() {
 
 start_ui() {
     local port="${UI_PORT:-8010}"
+    local backend_port="${BACKEND_PORT:-${HTTP_PORT:-8003}}"
     local log_file="${LOG_DIR}/ui.log"
+    if [[ -z "${BACKEND_PORT:-}" && -z "${HTTP_PORT:-}" && -f "${ROOT_DIR}/data/.config.yaml" ]]; then
+        backend_port="$(awk '/^[[:space:]]*http_port:[[:space:]]*[0-9]+[[:space:]]*$/ {print $2; exit}' "${ROOT_DIR}/data/.config.yaml")"
+        backend_port="${backend_port:-8003}"
+    fi
     [[ -f "${ROOT_DIR}/ui_server.py" ]] || {
         echo "[ERROR] oii 前端服务不存在: ${ROOT_DIR}/ui_server.py" >&2
         exit 1
@@ -156,8 +161,8 @@ start_ui() {
         echo "[ERROR] oii 前端端口 ${port} 已被占用" >&2
         exit 1
     fi
-    echo "[INFO] 启动 oii 前端: http://0.0.0.0:${port}"
-    "${PYTHON_BIN}" "${ROOT_DIR}/ui_server.py" --host 0.0.0.0 --port "${port}" >"${log_file}" 2>&1 &
+    echo "[INFO] 启动 oii 前端: http://0.0.0.0:${port} (中控 HTTP: ${backend_port})"
+    "${PYTHON_BIN}" "${ROOT_DIR}/ui_server.py" --host 0.0.0.0 --port "${port}" --backend-port "${backend_port}" >"${log_file}" 2>&1 &
     UI_PID=$!
     CHILD_PIDS+=("${UI_PID}")
     sleep 1
