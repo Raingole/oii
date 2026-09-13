@@ -4,22 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#eef3f8" />
-  <title>模拟 QQ · 中控助手</title>
+  <title>oii</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="login-view" id="loginView">
-    <div class="login-art"><div class="qq-orb">Q</div><span class="spark s1">✦</span><span class="spark s2">✦</span></div>
     <div class="login-panel">
-      <div class="wordmark"><span class="qq-mark">Q</span><span>模拟 QQ</span></div>
-      <h1>连接你的中控</h1>
-      <p class="lead">这是一个本地模拟 QQ 端。输入 user 和对应 QQ 号，消息会直接进入中控对话。</p>
       <form id="loginForm">
-        <label>user 名称<input id="username" name="username" autocomplete="username" placeholder="例如：我的私人账号" required minlength="2" maxlength="24" /></label>
-        <label>关联 QQ 号<input id="qqId" name="qq_id" inputmode="numeric" placeholder="私人账号请输入 2496303940" required pattern="[0-9]{5,14}" /></label>
-        <button class="primary-button" type="submit">进入模拟 QQ <span>→</span></button>
+        <label>用户名<input id="username" name="username" autocomplete="username" required minlength="2" maxlength="24" /></label>
+        <label>QQ号<input id="qqId" name="qq_id" inputmode="numeric" required pattern="[0-9]{5,14}" /></label>
+        <button class="primary-button" type="submit">进入</button>
       </form>
-      <p class="login-note"><span class="dot"></span> user 与 QQ 一对一绑定 · 数据隔离</p>
       <div class="form-error" id="loginError" role="alert"></div>
     </div>
   </div>
