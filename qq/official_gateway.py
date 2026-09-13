@@ -27,6 +27,8 @@ class QQOfficialGateway:
         self.websocket = None
         self.access_token = ""
         self.sequence = None
+        self.session_id = None
+        self.resume_gateway_url = None
         self._heartbeat_task = None
         self._send_lock = asyncio.Lock()
 
@@ -82,7 +84,8 @@ class QQOfficialGateway:
                 return gateway["url"], token["access_token"]
 
     async def _run_connection(self) -> None:
-        url, access_token = await self._get_gateway_url()
+        gateway_url, access_token = await self._get_gateway_url()
+        url = self.resume_gateway_url or gateway_url
         async with websockets.connect(url, ping_interval=None, max_size=4 * 1024 * 1024) as websocket:
             self.websocket = websocket
             self.access_token = access_token
@@ -96,32 +99,68 @@ class QQOfficialGateway:
                 self._heartbeat_task = asyncio.create_task(
                     self._heartbeat(websocket, hello.get("d", {}).get("heartbeat_interval", 45000))
                 )
-                await websocket.send(json.dumps({
-                    "op": 2,
-                    "d": {
-                        "token": f"QQBot {access_token}",
-                        "intents": self.intents,
-                        "shard": [0, 1],
-                        "properties": {"$os": "linux", "$browser": "oii", "$device": "oii"},
-                    },
-                }))
+                if self.session_id and self.sequence is not None:
+                    self.logger.bind(tag=__name__).info(
+                        f"QQ Official Bot resuming session: session_id={self.session_id}, sequence={self.sequence}"
+                    )
+                    await websocket.send(json.dumps({
+                        "op": 6,
+                        "d": {
+                            "token": f"QQBot {access_token}",
+                            "session_id": self.session_id,
+                            "seq": self.sequence,
+                        },
+                    }))
+                else:
+                    await websocket.send(json.dumps({
+                        "op": 2,
+                        "d": {
+                            "token": f"QQBot {access_token}",
+                            "intents": self.intents,
+                            "shard": [0, 1],
+                            "properties": {"$os": "linux", "$browser": "oii", "$device": "oii"},
+                        },
+                    }))
                 async for raw in websocket:
                     packet = json.loads(raw)
                     if packet.get("s") is not None:
                         self.sequence = packet["s"]
                     if packet.get("op") == 0:
                         if packet.get("t") == "READY":
+                            ready = packet.get("d") or {}
+                            self.session_id = ready.get("session_id") or self.session_id
+                            self.resume_gateway_url = ready.get("resume_gateway_url") or self.resume_gateway_url
                             self.logger.bind(tag=__name__).info("QQ Official Bot Gateway ready")
+                        elif packet.get("t") == "RESUMED":
+                            self.logger.bind(tag=__name__).info("QQ Official Bot Gateway session resumed")
                         await self._handle_dispatch(packet.get("t"), packet.get("d") or {})
                     elif packet.get("op") == 1:
                         await websocket.send(json.dumps({"op": 1, "d": self.sequence}))
                     elif packet.get("op") == 7:
-                        raise RuntimeError("QQ Gateway requested reconnect")
+                        self.logger.bind(tag=__name__).info("QQ Gateway requested reconnect; closing for session resume")
+                        await websocket.close(code=4000, reason="server requested reconnect")
+                        break
                     elif packet.get("op") == 9:
-                        raise RuntimeError("QQ Gateway rejected session")
+                        resumable = bool(packet.get("d"))
+                        self.logger.bind(tag=__name__).warning(
+                            f"QQ Gateway invalid session: resumable={resumable}"
+                        )
+                        if not resumable:
+                            self.session_id = None
+                            self.resume_gateway_url = None
+                            self.sequence = None
+                        await websocket.close(code=4000, reason="invalid session")
+                        break
                     elif packet.get("op") == 11:
                         self.logger.bind(tag=__name__).debug("QQ Official Bot heartbeat acknowledged")
             finally:
+                if getattr(websocket, "close_code", None) == 4009:
+                    self.logger.bind(tag=__name__).warning(
+                        "QQ Official Bot session timed out; starting a fresh session"
+                    )
+                    self.session_id = None
+                    self.resume_gateway_url = None
+                    self.sequence = None
                 if self._heartbeat_task:
                     self._heartbeat_task.cancel()
                     self._heartbeat_task = None
@@ -130,8 +169,11 @@ class QQOfficialGateway:
 
     async def _heartbeat(self, websocket, interval_ms: int) -> None:
         while True:
-            await asyncio.sleep(max(1, interval_ms / 1000))
-            await websocket.send(json.dumps({"op": 1, "d": self.sequence}))
+            await asyncio.sleep(max(1, interval_ms / 1000 * 0.8))
+            try:
+                await websocket.send(json.dumps({"op": 1, "d": self.sequence}))
+            except Exception:
+                return
 
     async def _handle_dispatch(self, event_type: str | None, data: dict) -> None:
         if event_type != "C2C_MESSAGE_CREATE":
