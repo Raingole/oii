@@ -12,6 +12,7 @@ LOG_DIR="${ROOT_DIR}/tmp/services"
 MEMORY_DIR="${ROOT_DIR}/TencentDB-Agent-Memory/MemoryCore"
 declare -a CHILD_PIDS=()
 MAIN_PID=""
+LOG_TAIL_PID=""
 
 info() { echo "[INFO] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
@@ -20,6 +21,9 @@ cleanup() {
     local code=$?
     trap - EXIT INT TERM
     info "Stopping OII services"
+    if [[ -n "${LOG_TAIL_PID}" ]]; then
+        kill "${LOG_TAIL_PID}" 2>/dev/null || true
+    fi
     for pid in "${MAIN_PID}" "${CHILD_PIDS[@]:-}"; do
         [[ -n "${pid}" ]] || continue
         kill -0 "${pid}" 2>/dev/null && kill "${pid}" 2>/dev/null || true
@@ -136,5 +140,26 @@ fi
 info "Starting OII controller"
 "${PYTHON_BIN}" app.py >tmp/server.log 2>&1 &
 MAIN_PID=$!
-info "OII started; log: ${ROOT_DIR}/tmp/server.log"
+
+PUBLIC_HOST="${PUBLIC_HOST:-$(hostname -I 2>/dev/null | awk '{print $1}' || true)}"
+PUBLIC_HOST="${PUBLIC_HOST:-服务器IP}"
+echo
+echo "============================================================"
+echo "OII services started"
+echo "UI:             http://${PUBLIC_HOST}:${UI_PORT_VALUE:-8010}/"
+echo "Controller HTTP: http://${PUBLIC_HOST}:${BACKEND_PORT_VALUE:-8003}/"
+echo "ESP32 WebSocket: ws://${PUBLIC_HOST}:8000/xiaozhi/v1/"
+echo "NapCat OneBot:   ws://${PUBLIC_HOST}:8082/onebot"
+echo "MemoryCore:      http://127.0.0.1:8420/health"
+echo "MCP Aggregator:  ws://127.0.0.1:8765/mcp/"
+echo "Logs:            ${ROOT_DIR}/tmp/server.log"
+echo "                 ${ROOT_DIR}/tmp/services/"
+echo "============================================================"
+echo "Live controller log (Ctrl+C stops all services):"
+echo
+
+if command -v tail >/dev/null 2>&1; then
+    tail -n 20 -f tmp/server.log &
+    LOG_TAIL_PID=$!
+fi
 wait "${MAIN_PID}"
