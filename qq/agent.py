@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from config.logger import setup_logging
-from core.agent_pipeline import AgentPipeline
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.utils.dialogue import Dialogue, Message
 from jinja2 import Template
@@ -85,7 +84,6 @@ class QQAgent:
         self.sessions: dict[str, QQConversation] = {}
         self.prompt = self._build_prompt(str(config.get("prompt", "")))
         self.context: QQAgentContext | None = None
-        self.pipeline = AgentPipeline(config)
         self.controller = controller
         cc = config.get("cognitive_core", {}) if isinstance(config.get("cognitive_core", {}), dict) else {}
         self.cognitive_client = CognitiveClient(str(cc.get("url", "http://127.0.0.1:8010")), float(cc.get("timeout", 3))) if cc.get("enabled", False) else None
@@ -199,7 +197,11 @@ class QQAgent:
                             session.dialogue.put(Message(role="assistant", content=reply_text))
                     return ReplyResult(reply_text, handled, dispatched, event.event_id)
                 except Exception as exc:
-                    self.logger.bind(tag=TAG).warning(f"Cognitive router unavailable; falling back to legacy pipeline: {exc}")
+                    self.logger.bind(tag=TAG).error(f"Cognitive router failed; legacy fallback is disabled: {exc}")
+                    # Do not fall back to AgentPipeline.  The cognitive path
+                    # has already produced/dispatched actions in most failure
+                    # cases, so an extra legacy reply could duplicate output.
+                    return ReplyResult("", True, [], source_event_id)
             if self.cognitive_client is not None:
                 try:
                     external_id = str((event_metadata or {}).get("actor_id") or session_key.rsplit(":", 1)[-1] if session_key else "owner")
@@ -216,23 +218,9 @@ class QQAgent:
                     messages = [a.get("payload", {}).get("text", "") for a in actions if a.get("type") == "send_message"]
                     if messages: return ReplyResult(messages[0], True, [], event.get("event_id", ""))
                 except (URLError, HTTPError, TimeoutError, OSError, ValueError) as exc:
-                    self.logger.bind(tag=TAG).warning(f"Cognitive Core unavailable; falling back to legacy pipeline: {exc}")
-            self.context.dialogue = session.dialogue
-            self.context.session_id = session_key
-            self.context.turn_id += 1
-            external_id = str((event_metadata or {}).get("actor_id") or session_key.rsplit(":", 1)[-1] if session_key else "")
-            if external_id.startswith("qq:"):
-                external_id = external_id[3:]
-            if self.context.memory_manager:
-                self.context.user_id = self.context.memory_manager.resolve_owner("qq", external_id)
-            self.context.last_tool_result = session.last_tool_result
-            # The ESP may connect after the QQ agent; refresh device tools for
-            # every QQ turn so the current MCP tool list is visible.
-            self.context.func_handler.tool_manager.refresh_tools()
-            answer = await self.pipeline.process(self.context, text, session_key)
-            session.last_tool_result = self.context.last_tool_result
-            self.logger.bind(tag=TAG).info(f"QQ agent finish: session={session_key}, answer_length={len(answer or '')}")
-            return ReplyResult(answer, False, [], source_event_id)
+                    self.logger.bind(tag=TAG).warning(f"Cognitive Core HTTP client unavailable; legacy fallback is disabled: {exc}")
+            self.logger.bind(tag=TAG).error("No cognitive event router available; legacy AgentPipeline is disabled")
+            return ReplyResult("思维核心当前不可用，请检查 Controller Cognitive Core 状态。", False, [], source_event_id)
 
     async def reply(self, session_key: str, text: str, source_event_id: str = "", event_metadata: dict[str, Any] | None = None) -> str:
         """Legacy compatibility API; request state remains in the return value."""
