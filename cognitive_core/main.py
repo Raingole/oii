@@ -8,6 +8,9 @@ from .runtime import CognitiveCore
 from .memory import TencentMemoryAdapter, FallbackMemoryPort
 from controller.approval_service import ApprovalService
 from config.config_loader import load_config
+from config.logger import setup_logging
+from core.utils.modules_initialize import initialize_modules
+from .llm import ExistingProviderLLM
 
 
 def main() -> None:
@@ -23,6 +26,17 @@ def main() -> None:
     ) if base else None
     memory = FallbackMemoryPort(remote_memory) if remote_memory else None
     core = CognitiveCore(db_path=os.getenv("COGNITIVE_DB_PATH") or str(cc.get("db_path", "data/cognitive/cognitive.db")), config={**cc, "api_token": os.getenv("COGNITIVE_CORE_API_TOKEN") or cc.get("api_token", "")}, memory=memory)
+    if cc.get("llm_enabled", False):
+        logger = setup_logging(config)
+        try:
+            modules = initialize_modules(logger, config, init_llm=True)
+            provider = modules.get("llm")
+            if provider is None:
+                raise RuntimeError("selected LLM provider was not initialized")
+            core.llm = ExistingProviderLLM(provider, timeout=float(cc.get("llm_timeout", 60) or 60))
+            logger.bind(tag="cognitive_core").info("cognitive LLM provider connected")
+        except Exception as exc:
+            logger.bind(tag="cognitive_core").error(f"cognitive LLM provider unavailable; fallback planner remains active: {exc}")
     approval = ApprovalService(core.store.path)
     web.run_app(create_app(core, approval=approval), host=os.getenv("COGNITIVE_CORE_HOST", "127.0.0.1"), port=int(os.getenv("COGNITIVE_CORE_PORT", "8010")))
 

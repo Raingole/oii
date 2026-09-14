@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from cognitive_core.contracts import CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
 from contracts.results import ActionResult
+
+logger = logging.getLogger(__name__)
 
 
 class EventRouter:
@@ -12,12 +15,17 @@ class EventRouter:
     def __init__(self, core: CognitiveCore, dispatcher: ActionDispatcher): self.core, self.dispatcher = core, dispatcher
 
     async def route(self, event: CognitiveEvent) -> dict[str, Any]:
+        logger.info("cognitive event received event_id=%s source=%s type=%s", event.event_id, event.source, event.type)
         result = await self.core.process_event(event)
         if result.get("duplicate"): return result
+        actions = result.get("actions", [])
+        logger.info("action planned event_id=%s count=%s", event.event_id, len(actions))
         dispatched = []
         feedback = []
-        for action in result.get("actions", []):
+        for action in actions:
+            logger.info("action dispatched event_id=%s action_id=%s type=%s", event.event_id, action.get("action_id"), action.get("type"))
             action_result = await self.dispatcher.dispatch(event.event_id, action)
+            logger.info("action result event_id=%s action_id=%s status=%s success=%s", event.event_id, action_result.action_id, action_result.status, action_result.success)
             dispatched.append(action_result.to_dict())
             result_event = self.build("controller", "action_result", "self", "environment", source_event_id=f"{action_result.action_id}:{action_result.status}", content={"action_id": action_result.action_id, "success": action_result.success, "result": action_result.result, "error": action_result.error}, session_id=event.session_id, metadata={"parent_event_id": event.event_id, "action_type": action.get("type")})
             feedback.append(await self.core.process_event(result_event))

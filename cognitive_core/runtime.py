@@ -4,6 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+try:
+    from loguru import logger
+except ModuleNotFoundError:  # pragma: no cover
+    import logging
+    logger = logging.getLogger(__name__)
+
 from .contracts import Action, CognitiveEvent
 from .cognition import appraisal, emotion_delta, meaning
 from .models import SelfModel
@@ -11,7 +17,7 @@ from .planning import plan
 from .storage import StateStore
 from .memory import InMemoryAdapter, MemoryAdapter, should_store
 from .prompt_builder import build_runtime_prompt
-from .llm import DecisionLLM, validate_decision
+from .llm import ExistingProviderLLM
 
 
 class CognitiveCore:
@@ -46,23 +52,38 @@ class CognitiveCore:
         self.self_model.emotion.clamp()
         meaning_result = meaning(event, app)
         actions = plan(event, self.self_model, self.goals)
+        trace_id = str(event.metadata.get("trace_id") or event.event_id)
         if self.llm is not None and self.config.get("llm_enabled", False) and event.source in {"qq", "esp32"}:
             try:
-                prompt = build_runtime_prompt(self.self_model.to_dict(), self.self_model.emotion.to_dict(), self.goals, [m.text for m in memories], event.to_dict(), self.config.get("available_tools", []), str(self.config.get("persona_prompt", "")))
-                provider = self.llm if hasattr(self.llm, "decide") else DecisionLLM(self.llm.provider if hasattr(self.llm, "provider") else self.llm)
-                decision, _summary = await provider.decide(prompt, str(event.content), {"intent": "do_nothing"}, event.metadata.get("trace_id", ""))
-                intent=decision.get("intent")
-                if intent == "wait": actions = [Action.create("wait", reason=decision.get("reason", "LLM structured decision"))]
-                elif intent == "do_nothing": actions = [Action.create("do_nothing", reason=decision.get("reason", "LLM structured decision"))]
-                elif intent == "reply" and decision.get("message"):
-                    target=event.actor_id; action_type="speak" if event.source=="esp32" else "send_message"
-                    actions=[Action.create(action_type,{"text":decision["message"],"platform":event.metadata.get("platform", event.source)},channel=event.source,target=target,risk_level=decision.get("risk_level","low"),reason=decision.get("reason","LLM decision"),requires_controller_approval=decision.get("risk_level") in {"high","critical"})]
-                elif intent == "tool_call":
-                    if decision.get("tool") and (not self.config.get("available_tools") or decision["tool"] in {x.get("name") for x in self.config.get("available_tools", [])}):
-                        risk=decision.get("risk_level","low"); actions=[Action.create("call_mcp",{"tool":decision["tool"],"arguments":decision.get("arguments",{})},risk_level=risk,reason=decision.get("reason","LLM tool decision"),requires_controller_approval=risk in {"high","critical"})]
-                    else: actions=[Action.create("do_nothing",reason="LLM requested unavailable tool")]
-            except Exception:
-                pass
+                prompt = build_runtime_prompt(
+                    self.self_model.to_dict(),
+                    self.self_model.emotion.to_dict(),
+                    self.goals,
+                    [m.text for m in memories],
+                    event.to_dict(),
+                    self.config.get("available_tools", []),
+                    str(self.config.get("persona_prompt", "")),
+                )
+                llm = self.llm
+                if not hasattr(llm, "decide"):
+                    llm = ExistingProviderLLM(llm, timeout=float(self.config.get("llm_timeout", 60)))
+                context = {
+                    "event": event.to_dict(),
+                    "trace_id": trace_id,
+                    "self": self.self_model.to_dict(),
+                    "emotion": self.self_model.emotion.to_dict(),
+                    "goals": self.goals,
+                    "memories": [m.text for m in memories],
+                    "tools": self.config.get("available_tools", []),
+                }
+                decision = await llm.decide(prompt, context, trace_id)
+                actions = self._actions_from_decision(decision, event)
+                logger.info(f"llm decision generated trace_id={trace_id} intent={decision.get('intent', '')}")
+            except Exception as exc:
+                # The deterministic planner remains the only fallback.  The
+                # reason is logged so silent LLM failures cannot suppress the
+                # legacy path without evidence.
+                logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
         memory_policy = should_store(event, app)
         if memory_policy == "episodic" or event.type == "action_result":
             scope = {
@@ -88,6 +109,75 @@ class CognitiveCore:
         for action in actions: self.store.put("actions", action.action_id, action.to_dict())
         self.last_tick = {"event": event.to_dict(), "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories]}
         return {"event_id": event.event_id, "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories], "actions": [a.to_dict() for a in actions]}
+
+    @staticmethod
+    def _reply_target(event: CognitiveEvent) -> str:
+        return str(event.metadata.get("actor_id") or event.actor_id)
+
+    def _actions_from_decision(self, decision: dict[str, Any], event: CognitiveEvent) -> list[Action]:
+        intent = decision.get("intent")
+        risk = str(decision.get("risk_level", "low") or "low")
+        requires_approval = risk in {"high", "critical"}
+        reason = str(decision.get("reason", "") or "LLM structured decision")
+        if intent == "wait":
+            return [Action.create("wait", reason=reason)]
+        if intent == "do_nothing":
+            return [Action.create("do_nothing", reason=reason)]
+        if intent == "ask_confirmation":
+            return [Action.create(
+                "request_confirmation",
+                {"text": str(decision.get("message", "") or "")},
+                channel=event.source,
+                target=self._reply_target(event),
+                risk_level=risk,
+                reason=reason,
+                requires_controller_approval=requires_approval,
+            )]
+        if intent == "reply":
+            message = str(decision.get("message", "") or "").strip()
+            if not message:
+                return [Action.create("do_nothing", reason="LLM reply missing message")]
+            if event.source == "esp32":
+                return [Action.create(
+                    "speak",
+                    {"text": message},
+                    channel="esp32",
+                    target=event.actor_id,
+                    risk_level=risk,
+                    reason=reason,
+                    requires_controller_approval=requires_approval,
+                )]
+            payload = {
+                "text": message,
+                "platform": event.metadata.get("platform", event.source),
+                "source_message_id": event.source_event_id,
+            }
+            return [Action.create(
+                "send_message",
+                payload,
+                channel="qq",
+                target=self._reply_target(event),
+                risk_level=risk,
+                reason=reason,
+                requires_controller_approval=requires_approval,
+            )]
+        if intent == "tool_call":
+            tool = str(decision.get("tool", "") or "").strip()
+            available_tools = self.config.get("available_tools", []) or []
+            allowed = {str(item.get("name", "")) for item in available_tools if isinstance(item, dict)}
+            if not tool or (available_tools and tool not in allowed):
+                return [Action.create("do_nothing", reason="LLM requested unavailable tool")]
+            arguments = decision.get("arguments", {})
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return [Action.create(
+                "call_mcp",
+                {"tool": tool, "arguments": arguments},
+                risk_level=risk,
+                reason=reason,
+                requires_controller_approval=requires_approval,
+            )]
+        return [Action.create("do_nothing", reason="unsupported LLM decision")]
 
     async def run_once(self, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         emotion = self.self_model.emotion

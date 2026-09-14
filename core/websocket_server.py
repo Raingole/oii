@@ -73,7 +73,10 @@ class WebSocketServer:
         self._asr = modules["asr"] if "asr" in modules else None
         self._llm = modules["llm"] if "llm" in modules else None
         if self.cognitive_runtime and self._llm and self.cognitive_runtime.core.config.get("llm_enabled", False):
-            self.cognitive_runtime.core.llm = ExistingProviderLLM(self._llm)
+            self.cognitive_runtime.core.llm = ExistingProviderLLM(
+                self._llm,
+                timeout=float(cc_config.get("llm_timeout", 60) or 60),
+            )
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
 
@@ -249,6 +252,12 @@ class WebSocketServer:
                     self._asr = modules["asr"]
                 if "llm" in modules:
                     self._llm = modules["llm"]
+                    if self.cognitive_runtime and self.cognitive_runtime.core.config.get("llm_enabled", False):
+                        cc_config = new_config.get("cognitive_core", {}) if isinstance(new_config.get("cognitive_core", {}), dict) else {}
+                        self.cognitive_runtime.core.llm = ExistingProviderLLM(
+                            self._llm,
+                            timeout=float(cc_config.get("llm_timeout", 60) or 60),
+                        )
                 if "intent" in modules:
                     self._intent = modules["intent"]
                 if "memory" in modules:

@@ -18,6 +18,9 @@ class EmotionState:
     social_desire: float = 0.3
     energy: float = 0.8
 
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
+
     def clamp(self) -> "EmotionState":
         for key, value in asdict(self).items():
             setattr(self, key, max(-1.0, min(1.0, value)) if key == "valence" else max(0.0, min(1.0, value)))

@@ -150,7 +150,10 @@ class QQAgent:
             if getattr(self.controller, "event_router", None) is not None:
                 try:
                     external_id = session_key.rsplit(":", 1)[-1] if session_key else "owner"
-                    event = self.controller.event_router.build("qq", "message", f"qq:{external_id}", "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", **(event_metadata or {})})
+                    actor_id = str((event_metadata or {}).get("actor_id") or f"qq:{external_id}")
+                    if not actor_id.startswith("qq:"):
+                        actor_id = f"qq:{actor_id}"
+                    event = self.controller.event_router.build("qq", "message", actor_id, "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", **(event_metadata or {})})
                     result = await self.controller.event_router.route(event)
                     messages = [a.get("payload", {}).get("text", "") for a in result.get("actions", []) if a.get("type") == "send_message"]
                     dispatched = result.get("dispatched", [])

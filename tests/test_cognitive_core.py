@@ -9,6 +9,7 @@ from pathlib import Path
 from cognitive_core import CognitiveCore, CognitiveEvent, Action
 from cognitive_core.memory import InMemoryAdapter, TencentMemoryAdapter, FallbackMemoryPort, should_store
 from cognitive_core.structured import parse_structured, validate_appraisal
+from cognitive_core.llm import ExistingProviderLLM, LLMDecisionError
 from cognitive_core.mcp import ToolRegistry, ToolSpec
 from cognitive_core.bridge import ControllerBridge
 from cognitive_core.embodiment import BodyRegistry
@@ -149,6 +150,114 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
             response = await client.post("/events", json=payload, headers={"Authorization": "Bearer local-test"})
             self.assertEqual(response.status, 200)
         finally: await client.close()
+
+
+    async def test_existing_provider_llm_returns_validated_decision(self):
+        class StaticProvider:
+            def __init__(self):
+                self.calls = []
+
+            def response_no_stream(self, system_prompt, user_prompt):
+                self.calls.append((system_prompt, user_prompt))
+                return '```json\n{"intent": "reply", "message": "pong", "risk_level": "low"}\n```'
+
+        provider = StaticProvider()
+        decision = await ExistingProviderLLM(provider).decide("system", {"event": "ping"}, "trace-1")
+        self.assertEqual(decision["intent"], "reply")
+        self.assertEqual(decision["message"], "pong")
+        self.assertIn('"event": "ping"', provider.calls[0][1])
+
+    async def test_existing_provider_llm_rejects_invalid_schema(self):
+        class InvalidProvider:
+            def response_no_stream(self, system_prompt, user_prompt):
+                return '{"message": "missing intent"}'
+
+        with self.assertRaises(LLMDecisionError):
+            await ExistingProviderLLM(InvalidProvider()).decide("system", {}, "trace-2")
+
+    async def test_cognitive_core_uses_llm_decision(self):
+        class FakeLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                return {
+                    "intent": "reply",
+                    "message": "LLM 实际回复",
+                    "tool": "",
+                    "arguments": {},
+                    "risk_level": "low",
+                    "reason": "test",
+                    "goal_id": "",
+                }
+
+        self.core.config["llm_enabled"] = True
+        self.core.llm = FakeLLM()
+        event = CognitiveEvent.create("qq", "message", "qq:1", "agent", {"text": "测试"}, "qq:1")
+        result = await self.core.process_event(event)
+        self.assertEqual(result["actions"][0]["type"], "send_message")
+        self.assertEqual(result["actions"][0]["payload"]["text"], "LLM 实际回复")
+
+    async def test_cognitive_core_llm_failure_keeps_planner_fallback(self):
+        class BrokenLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                raise RuntimeError("provider timeout")
+
+        self.core.config["llm_enabled"] = True
+        self.core.llm = BrokenLLM()
+        event = CognitiveEvent.create("qq", "message", "qq:2", "agent", {"text": "测试"}, "qq:2")
+        result = await self.core.process_event(event)
+        self.assertEqual(result["actions"][0]["type"], "send_message")
+        self.assertIn("我记下了", result["actions"][0]["payload"]["text"])
+
+    async def test_cognitive_core_llm_tool_call_uses_catalog(self):
+        class ToolLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                return {
+                    "intent": "tool_call",
+                    "message": "",
+                    "tool": "get_weather",
+                    "arguments": {"city": "重庆"},
+                    "risk_level": "low",
+                    "reason": "weather required",
+                    "goal_id": "",
+                }
+
+        self.core.config["llm_enabled"] = True
+        self.core.config["available_tools"] = [{"name": "get_weather"}]
+        self.core.llm = ToolLLM()
+        event = CognitiveEvent.create("qq", "message", "qq:3", "agent", {"text": "天气"}, "qq:3")
+        result = await self.core.process_event(event)
+        self.assertEqual(result["actions"][0]["type"], "call_mcp")
+        self.assertEqual(result["actions"][0]["payload"]["tool"], "get_weather")
+
+    async def test_official_actor_id_survives_shared_session_identity(self):
+        # Official QQ uses the same memory/session key for a shared bot, but
+        # the delivery target must stay the real user_openid supplied by the
+        # gateway metadata.
+        self.core.config["llm_enabled"] = True
+
+        class TargetLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                return {
+                    "intent": "reply",
+                    "message": "ok",
+                    "tool": "",
+                    "arguments": {},
+                    "risk_level": "low",
+                    "reason": "test",
+                    "goal_id": "",
+                }
+
+        self.core.llm = TargetLLM()
+        event = CognitiveEvent.create(
+            "qq",
+            "message",
+            "qq:shared-identity",
+            "agent",
+            {"text": "hi"},
+            "qq:private:shared-identity",
+            metadata={"platform": "official", "actor_id": "qq:real-openid"},
+        )
+        result = await self.core.process_event(event)
+        self.assertEqual(result["actions"][0]["target"], "qq:real-openid")
 
 
 async def _record(target, action):
