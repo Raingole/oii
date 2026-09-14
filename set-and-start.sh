@@ -73,7 +73,10 @@ port_is_busy() {
 }
 
 start_mcp() {
-    local name="$1" script="$2" port="$3" log_file="${LOG_DIR}/mcp-${name}.log"
+    local name="$1"
+    local script="$2"
+    local port="$3"
+    local log_file="${LOG_DIR}/mcp-${name}.log"
     [[ -f "${script}" ]] || fail "MCP script not found: ${script}"
     port_is_busy "${port}" && fail "MCP port is already in use: ${port}"
     info "Starting MCP ${name} on ${port}"
