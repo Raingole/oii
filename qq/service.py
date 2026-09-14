@@ -10,6 +10,16 @@ from config.logger import setup_logging
 TAG = __name__
 
 
+def napcat_action_succeeded(http_status: int, payload: dict[str, Any]) -> bool:
+    """Accept the success envelopes used by supported NapCat versions."""
+    retcode = payload.get("retcode", 0)
+    return (
+        http_status < 400
+        and payload.get("status", "ok") == "ok"
+        and retcode in (0, 200, "0", "200")
+    )
+
+
 class QQService:
     def __init__(self, config: dict):
         qq_config = config.get("qq", {})
@@ -64,7 +74,12 @@ class QQService:
                     timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as response:
                     payload = await response.json(content_type=None)
-                    ok = response.status < 400 and payload.get("status", "ok") == "ok" and payload.get("retcode", 0) == 0
+                    # NapCat/OneBot deployments in the wild use both the
+                    # standard retcode=0 and HTTP-like retcode=200 for a
+                    # successful action.  The HTTP status and status field
+                    # remain authoritative; do not turn a successful 200
+                    # response into a legacy-pipeline failure.
+                    ok = napcat_action_succeeded(response.status, payload)
                     if not ok:
                         self.logger.bind(tag=TAG).error(
                             f"NapCat Action failed: action={action}, status={response.status}, retcode={payload.get('retcode')}"

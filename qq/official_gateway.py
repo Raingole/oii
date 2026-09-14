@@ -185,7 +185,16 @@ class QQOfficialGateway:
             return
         session_id = self.memory_identity or user_id
         session_key = f"qq:private:{session_id}"
-        reply = await self.agent.reply_result(session_key, text, message_id, {"platform": "official"}) if hasattr(self.agent, "reply_result") else None
+        # Keep the memory/session identity independent from the official QQ
+        # openid used as the delivery target.  The latter must survive into
+        # the Cognitive Action; otherwise a shared memory_identity can cause
+        # replies to be sent to the wrong user (or no user).
+        reply = await self.agent.reply_result(
+            session_key,
+            text,
+            message_id,
+            {"platform": "official", "actor_id": f"qq:{user_id}"},
+        ) if hasattr(self.agent, "reply_result") else None
         answer = reply.text if reply else await self.agent.reply(session_key, text, message_id, {"platform": "official"})
         if not (reply and reply.handled_by_cognitive):
             await self._send_c2c_message(user_id, answer, message_id)

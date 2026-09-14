@@ -14,6 +14,7 @@ from core.utils.dialogue import Dialogue
 from jinja2 import Template
 from cognitive_core.client import CognitiveClient
 from urllib.error import URLError, HTTPError
+from .delivery import cognitive_delivery_confirmed
 
 TAG = __name__
 
@@ -152,12 +153,20 @@ class QQAgent:
                     event = self.controller.event_router.build("qq", "message", f"qq:{external_id}", "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", **(event_metadata or {})})
                     result = await self.controller.event_router.route(event)
                     messages = [a.get("payload", {}).get("text", "") for a in result.get("actions", []) if a.get("type") == "send_message"]
-                    return ReplyResult(messages[0] if messages else "", bool(result.get("dispatched")) or bool(result.get("duplicate")), result.get("dispatched", []), event.event_id)
+                    dispatched = result.get("dispatched", [])
+                    # An action being accepted by the Cognitive Core is not
+                    # enough to suppress the legacy reply.  Only a confirmed
+                    # succeeded ActionResult means that a reply was really
+                    # delivered by a Controller executor.
+                    handled = bool(result.get("duplicate")) or cognitive_delivery_confirmed(dispatched)
+                    return ReplyResult(messages[0] if messages else "", handled, dispatched, event.event_id)
                 except Exception as exc:
                     self.logger.bind(tag=TAG).warning(f"Cognitive router unavailable; falling back to legacy pipeline: {exc}")
             if self.cognitive_client is not None:
                 try:
-                    external_id = session_key.rsplit(":", 1)[-1] if session_key else "owner"
+                    external_id = str((event_metadata or {}).get("actor_id") or session_key.rsplit(":", 1)[-1] if session_key else "owner")
+                    if external_id.startswith("qq:"):
+                        external_id = external_id[3:]
                     event = {
                         "event_id": f"qq:{source_event_id}" if source_event_id else "",
                         "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
@@ -173,7 +182,9 @@ class QQAgent:
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
             self.context.turn_id += 1
-            external_id = session_key.rsplit(":", 1)[-1] if session_key else ""
+            external_id = str((event_metadata or {}).get("actor_id") or session_key.rsplit(":", 1)[-1] if session_key else "")
+            if external_id.startswith("qq:"):
+                external_id = external_id[3:]
             if self.context.memory_manager:
                 self.context.user_id = self.context.memory_manager.resolve_owner("qq", external_id)
             self.context.last_tool_result = session.last_tool_result
