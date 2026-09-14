@@ -50,6 +50,11 @@ class QQAgentContext:
         self.session_id = ""
         self.dialogue = Dialogue()
         self.func_handler = UnifiedToolHandler(self)
+        intent_config = config.get("Intent", {}) if isinstance(config.get("Intent", {}), dict) else {}
+        selected_intent = config.get("selected_module", {}).get("Intent", "nointent") if isinstance(config.get("selected_module", {}), dict) else "nointent"
+        selected_settings = intent_config.get(selected_intent, {}) if isinstance(intent_config.get(selected_intent, {}), dict) else {}
+        self.intent_type = str(selected_settings.get("type", selected_intent))
+        self.load_function_plugin = self.intent_type in {"function_call", "intent_llm"}
         self.last_tool_result = None
         self.current_user_query = ""
         self.turn_id = 0

@@ -201,12 +201,16 @@ class TencentMemoryAdapter(MemoryService):
             f"[Memory][user={user_id}][session={session_id}][turn={turn_id}] commit started"
         )
         try:
+            messages = []
+            if _text(user_text).strip():
+                messages.append({"role": "user", "content": _text(user_text)})
+            if _text(assistant_text).strip():
+                messages.append({"role": "assistant", "content": _text(assistant_text)})
+            if not messages:
+                return {"accepted_ids": [], "total_count": 0}
             result = self._post(
                 "/v2/conversation/add",
-                {**self._scope(user_id), "session_id": session_id, "messages": [
-                    {"role": "user", "content": user_text},
-                    {"role": "assistant", "content": assistant_text},
-                ]},
+                {**self._scope(user_id), "session_id": session_id, "messages": messages},
             )
             self.logger.bind(tag=TAG).info(
                 f"[Memory][user={user_id}][session={session_id}][turn={turn_id}] commit success latency={int((time.perf_counter()-started)*1000)}ms accepted={len(result.get('accepted_ids', []))}"

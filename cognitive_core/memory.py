@@ -100,7 +100,7 @@ class TencentMemoryAdapter:
     async def store(self, text: str, metadata: dict[str, Any] | None = None) -> bool:
         meta = metadata or {}
         scope = {"team_id": meta.get("team_id", self.team_id), "agent_id": meta.get("agent_id", self.agent_id), "user_id": meta.get("user_id", self.user_id)}
-        await self._request("POST", f"/{self.api_version}/conversation/add", {"session_id": meta.get("session_id", "cognitive-core"), "messages": [{"role": "memory", "content": text}], **scope, **meta}, user_id=scope["user_id"])
+        await self._request("POST", f"/{self.api_version}/conversation/add", {"session_id": meta.get("session_id", "cognitive-core"), "messages": [{"role": "assistant", "content": text}], **scope, **meta}, user_id=scope["user_id"])
         return True
 
     async def update(self, memory_id: str, text: str, metadata: dict[str, Any] | None = None) -> bool:
