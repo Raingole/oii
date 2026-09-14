@@ -38,6 +38,18 @@ QQ 入口只负责平台协议适配，业务处理统一进入 `QQAgent` 和公
 ./set-and-start.sh
 ```
 
+启用 Cognitive Core 后，认知层会嵌入主中控运行，不需要另起一个 `cognitive_core` 进程。请在私有配置 `data/.config.yaml` 中填写：
+
+```yaml
+cognitive_core:
+  enabled: true
+  llm_enabled: true
+  persona_prompt: |
+    # 在这里填写你自己的提示词
+```
+
+`persona_prompt` 是认知核心的提示词空位；`prompt` 仍用于旧 Agent Pipeline 的兼容 fallback。
+
 服务器运行前会读取：
 
 ```text

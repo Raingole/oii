@@ -48,7 +48,7 @@ class CognitiveCore:
         actions = plan(event, self.self_model, self.goals)
         if self.llm is not None and self.config.get("llm_enabled", False) and event.source in {"qq", "esp32"}:
             try:
-                prompt = build_runtime_prompt(self.self_model.to_dict(), self.self_model.emotion.to_dict(), self.goals, [m.text for m in memories], event.to_dict(), self.config.get("available_tools", []))
+                prompt = build_runtime_prompt(self.self_model.to_dict(), self.self_model.emotion.to_dict(), self.goals, [m.text for m in memories], event.to_dict(), self.config.get("available_tools", []), str(self.config.get("persona_prompt", "")))
                 provider = self.llm if hasattr(self.llm, "decide") else DecisionLLM(self.llm.provider if hasattr(self.llm, "provider") else self.llm)
                 decision, _summary = await provider.decide(prompt, str(event.content), {"intent": "do_nothing"}, event.metadata.get("trace_id", ""))
                 intent=decision.get("intent")
