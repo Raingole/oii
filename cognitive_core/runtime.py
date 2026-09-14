@@ -114,6 +114,18 @@ class CognitiveCore:
     def _reply_target(event: CognitiveEvent) -> str:
         return str(event.metadata.get("actor_id") or event.actor_id)
 
+    @staticmethod
+    def _tool_name(item: Any) -> str:
+        if not isinstance(item, dict):
+            return ""
+        direct = item.get("name")
+        if direct:
+            return str(direct)
+        function = item.get("function")
+        if isinstance(function, dict) and function.get("name"):
+            return str(function["name"])
+        return ""
+
     def _actions_from_decision(self, decision: dict[str, Any], event: CognitiveEvent) -> list[Action]:
         intent = decision.get("intent")
         risk = str(decision.get("risk_level", "low") or "low")
@@ -123,7 +135,9 @@ class CognitiveCore:
             return [Action.create("wait", reason=reason)]
         if intent == "do_nothing":
             return [Action.create("do_nothing", reason=reason)]
-        if intent == "ask_confirmation":
+        if intent == "observe":
+            return [Action.create("observe", reason=reason)]
+        if intent in {"request_confirmation", "ask_confirmation"}:
             return [Action.create(
                 "request_confirmation",
                 {"text": str(decision.get("message", "") or "")},
@@ -161,10 +175,22 @@ class CognitiveCore:
                 reason=reason,
                 requires_controller_approval=requires_approval,
             )]
+        if intent == "schedule":
+            arguments = decision.get("arguments", {})
+            if not isinstance(arguments, dict):
+                arguments = {}
+            arguments.setdefault("next_action", {"type": "do_nothing"})
+            return [Action.create(
+                "schedule",
+                arguments,
+                risk_level=risk,
+                reason=reason,
+                requires_controller_approval=requires_approval,
+            )]
         if intent == "tool_call":
             tool = str(decision.get("tool", "") or "").strip()
             available_tools = self.config.get("available_tools", []) or []
-            allowed = {str(item.get("name", "")) for item in available_tools if isinstance(item, dict)}
+            allowed = {self._tool_name(item) for item in available_tools}
             if not tool or (available_tools and tool not in allowed):
                 return [Action.create("do_nothing", reason="LLM requested unavailable tool")]
             arguments = decision.get("arguments", {})

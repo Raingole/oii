@@ -25,7 +25,7 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
     if "intent" not in value:
         raise ValueError("decision.intent is required")
     intent = str(value.get("intent", "")).strip()
-    if intent not in {"reply", "tool_call", "wait", "do_nothing", "ask_confirmation"}:
+    if intent not in {"reply", "tool_call", "schedule", "request_confirmation", "ask_confirmation", "wait", "observe", "do_nothing"}:
         raise ValueError("invalid decision intent")
     risk = str(value.get("risk_level", "low")).strip()
     if risk not in {"low", "medium", "high", "critical"}:

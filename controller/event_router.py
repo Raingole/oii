@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 from cognitive_core.contracts import CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
 from contracts.results import ActionResult
 
-logger = logging.getLogger(__name__)
+try:
+    from loguru import logger
+except ModuleNotFoundError:  # pragma: no cover
+    import logging
+    logger = logging.getLogger(__name__)
 
 
 class EventRouter:

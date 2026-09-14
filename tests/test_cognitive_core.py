@@ -9,7 +9,7 @@ from pathlib import Path
 from cognitive_core import CognitiveCore, CognitiveEvent, Action
 from cognitive_core.memory import InMemoryAdapter, TencentMemoryAdapter, FallbackMemoryPort, should_store
 from cognitive_core.structured import parse_structured, validate_appraisal
-from cognitive_core.llm import ExistingProviderLLM, LLMDecisionError
+from cognitive_core.llm import ExistingProviderLLM, LLMDecisionError, validate_decision
 from cognitive_core.mcp import ToolRegistry, ToolSpec
 from cognitive_core.bridge import ControllerBridge
 from cognitive_core.embodiment import BodyRegistry
@@ -221,12 +221,16 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
                 }
 
         self.core.config["llm_enabled"] = True
-        self.core.config["available_tools"] = [{"name": "get_weather"}]
+        self.core.config["available_tools"] = [{"type": "function", "function": {"name": "get_weather"}}]
         self.core.llm = ToolLLM()
         event = CognitiveEvent.create("qq", "message", "qq:3", "agent", {"text": "天气"}, "qq:3")
         result = await self.core.process_event(event)
         self.assertEqual(result["actions"][0]["type"], "call_mcp")
         self.assertEqual(result["actions"][0]["payload"]["tool"], "get_weather")
+
+    def test_decision_intents_match_prompt_contract(self):
+        for intent in ("observe", "request_confirmation", "schedule"):
+            self.assertEqual(validate_decision({"intent": intent})["intent"], intent)
 
     async def test_official_actor_id_survives_shared_session_identity(self):
         # Official QQ uses the same memory/session key for a shared bot, but

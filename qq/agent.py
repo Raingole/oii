@@ -139,6 +139,29 @@ class QQAgent:
     async def reply_result(self, session_key: str, text: str, source_event_id: str = "", event_metadata: dict[str, Any] | None = None) -> ReplyResult:
         self.logger.bind(tag=TAG).info(f"QQ agent start: session={session_key}, text_length={len(text or '')}")
         await self.start()
+        if self.controller is not None and getattr(self.controller, "event_router", None) is not None:
+            try:
+                func_handler = getattr(self.context, "func_handler", None)
+                if func_handler is not None:
+                    func_handler.tool_manager.refresh_tools()
+                    raw_tools = func_handler.get_functions()
+                    tools = []
+                    for tool in raw_tools or []:
+                        if not isinstance(tool, dict):
+                            continue
+                        function = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+                        name = function.get("name") or tool.get("name")
+                        if not name:
+                            continue
+                        tools.append({
+                            "name": str(name),
+                            "description": function.get("description") or tool.get("description", ""),
+                            "parameters": function.get("parameters") or tool.get("parameters", {}),
+                        })
+                    self.controller.event_router.core.config["available_tools"] = tools
+                    self.logger.bind(tag=TAG).info(f"Cognitive tool catalog refreshed: {len(tools)} tools")
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(f"Cognitive tool catalog refresh failed: {exc}")
         session = self._get_session(session_key)
         async with session.lock:
             if not source_event_id:
