@@ -72,6 +72,11 @@ async def load_config():
         if os.environ.get(env_name) is not None:
             value = os.environ[env_name]
             cognitive[config_name] = value.lower() in {"1", "true", "yes", "on"} if config_name == "enabled" else value
+    # There is one effective user-editable prompt.  The cognitive persona is
+    # shared by the new runtime and the legacy fallback; old prompt blocks in
+    # the base config are intentionally ignored.
+    config["prompt"] = str(cognitive.get("persona_prompt", "") or "")
+    config["prompt_template"] = ""
     # 初始化目录
     ensure_directories(config)
 
