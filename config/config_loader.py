@@ -77,6 +77,10 @@ async def load_config():
     # the base config are intentionally ignored.
     config["prompt"] = str(cognitive.get("persona_prompt", "") or "")
     config["prompt_template"] = ""
+    # Disable legacy/end-of-conversation prompt overrides. The shared prompt
+    # file is the only effective prompt source for every runtime.
+    if isinstance(config.get("end_prompt"), dict):
+        config["end_prompt"]["enable"] = False
     # 初始化目录
     ensure_directories(config)
 

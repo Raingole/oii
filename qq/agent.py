@@ -86,11 +86,7 @@ class QQAgent:
 
     def _build_prompt(self, base_prompt: str) -> str:
         """Apply the shared project prompt structure without rewriting the user's prompt."""
-        if not base_prompt.strip():
-            return ""
-        template_path = Path(str(self.config.get("prompt_template") or "agent-base-prompt.txt"))
-        if not template_path.is_absolute():
-            template_path = Path(__file__).resolve().parents[1] / template_path
+        template_path = Path(__file__).resolve().parents[1] / "cognitive_core" / "prompt" / "core_prompt.md"
         try:
             template = Template(template_path.read_text(encoding="utf-8"))
             return template.render(
