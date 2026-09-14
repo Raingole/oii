@@ -53,7 +53,7 @@ class CognitiveCore:
         meaning_result = meaning(event, app)
         actions = plan(event, self.self_model, self.goals)
         trace_id = str(event.metadata.get("trace_id") or event.event_id)
-        if self.llm is not None and self.config.get("llm_enabled", False) and event.source in {"qq", "esp32"}:
+        if self.llm is not None and self.config.get("llm_enabled", False) and (event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")):
             try:
                 prompt = build_runtime_prompt(
                     self.self_model.to_dict(),
@@ -113,7 +113,7 @@ class CognitiveCore:
 
     @staticmethod
     def _reply_target(event: CognitiveEvent) -> str:
-        return str(event.metadata.get("actor_id") or event.actor_id)
+        return str(event.metadata.get("reply_target") or event.metadata.get("actor_id") or event.actor_id)
 
     @staticmethod
     def _tool_name(item: Any) -> str:
@@ -165,12 +165,12 @@ class CognitiveCore:
             payload = {
                 "text": message,
                 "platform": event.metadata.get("platform", event.source),
-                "source_message_id": event.source_event_id,
+                "source_message_id": event.metadata.get("source_message_id", event.source_event_id),
             }
             return [Action.create(
                 "send_message",
                 payload,
-                channel="qq",
+                channel=str(event.metadata.get("reply_channel") or "qq"),
                 target=self._reply_target(event),
                 risk_level=risk,
                 reason=reason,

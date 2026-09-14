@@ -257,6 +257,48 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("上一句", captured["prompt"])
         self.assertIn("上一答", captured["prompt"])
 
+    async def test_tool_call_gets_followup_reply(self):
+        calls = []
+
+        class ToolLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                event = context.get("event", {})
+                if event.get("type") == "action_result":
+                    calls.append("followup")
+                    return {"intent": "reply", "message": "已保存", "risk_level": "low"}
+                calls.append("tool")
+                return {
+                    "intent": "tool_call",
+                    "message": "",
+                    "tool": "secret.store",
+                    "arguments": {"name": "deepseek_api_key", "value": "sk-test"},
+                    "risk_level": "low",
+                }
+
+        self.core.config["llm_enabled"] = True
+        self.core.config["available_tools"] = [{"name": "secret.store"}]
+        self.core.llm = ToolLLM()
+
+        outbox = ActionOutbox(Path(self.tmp.name) / "followup.db")
+        dispatcher = ActionDispatcher(outbox)
+        sent = []
+
+        async def send_message(action):
+            sent.append(action["payload"]["text"])
+            return {"sent": True}
+
+        async def call_mcp(action):
+            return {"success": True, "result": {"response": "stored"}}
+
+        dispatcher.register("send_message", send_message)
+        dispatcher.register("call_mcp", call_mcp)
+        router = EventRouter(self.core, dispatcher)
+        event = router.build("qq", "message", "qq:9", "agent", source_event_id="followup-1", content={"text": "记住密钥"})
+        result = await router.route(event)
+        self.assertEqual(calls, ["tool", "followup"])
+        self.assertEqual(sent, ["已保存"])
+        self.assertEqual(result["dispatched"][-1]["status"], "succeeded")
+
     async def test_official_actor_id_survives_shared_session_identity(self):
         # Official QQ uses the same memory/session key for a shared bot, but
         # the delivery target must stay the real user_openid supplied by the

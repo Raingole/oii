@@ -30,8 +30,56 @@ class EventRouter:
             action_result = await self.dispatcher.dispatch(event.event_id, action)
             logger.info(f"action result event_id={event.event_id} action_id={action_result.action_id} status={action_result.status} success={action_result.success}")
             dispatched.append(action_result.to_dict())
-            result_event = self.build("controller", "action_result", "self", "environment", source_event_id=f"{action_result.action_id}:{action_result.status}", content={"action_id": action_result.action_id, "success": action_result.success, "result": action_result.result, "error": action_result.error}, session_id=event.session_id, metadata={"parent_event_id": event.event_id, "action_type": action.get("type")})
-            feedback.append(await self.core.process_event(result_event))
+            payload = action.get("payload", {}) if isinstance(action.get("payload", {}), dict) else {}
+            result_event = self.build(
+                "controller",
+                "action_result",
+                "self",
+                "environment",
+                source_event_id=f"{action_result.action_id}:{action_result.status}",
+                content={
+                    "action_id": action_result.action_id,
+                    "success": action_result.success,
+                    "result": action_result.result,
+                    "error": action_result.error,
+                },
+                session_id=event.session_id,
+                metadata={
+                    "parent_event_id": event.event_id,
+                    "action_type": action.get("type"),
+                    "reply_target": action.get("target") or event.actor_id,
+                    "reply_channel": action.get("channel") or event.source,
+                    "platform": event.metadata.get("platform", event.source),
+                    "source_message_id": payload.get("source_message_id") or event.source_event_id,
+                    "conversation_history": event.metadata.get("conversation_history", []),
+                    "followup_reply": action.get("type") == "call_mcp" and action_result.success,
+                },
+            )
+            feedback_result = await self.core.process_event(result_event)
+            feedback.append(feedback_result)
+            for followup in feedback_result.get("actions", []):
+                if followup.get("type") in {"do_nothing", "wait", "observe"}:
+                    continue
+                logger.info(f"follow-up action dispatched event_id={result_event.event_id} action_id={followup.get('action_id')} type={followup.get('type')}")
+                followup_result = await self.dispatcher.dispatch(result_event.event_id, followup)
+                logger.info(f"follow-up action result event_id={result_event.event_id} action_id={followup_result.action_id} status={followup_result.status} success={followup_result.success}")
+                dispatched.append(followup_result.to_dict())
+                followup_event = self.build(
+                    "controller",
+                    "action_result",
+                    "self",
+                    "environment",
+                    source_event_id=f"{followup_result.action_id}:{followup_result.status}",
+                    content={
+                        "action_id": followup_result.action_id,
+                        "success": followup_result.success,
+                        "result": followup_result.result,
+                        "error": followup_result.error,
+                    },
+                    session_id=result_event.session_id,
+                    metadata={"parent_event_id": result_event.event_id, "action_type": followup.get("type")},
+                )
+                feedback.append(await self.core.process_event(followup_event))
         result["dispatched"] = dispatched
         result["feedback"] = feedback
         return result
