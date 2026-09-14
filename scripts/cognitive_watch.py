@@ -100,6 +100,12 @@ def short(value: Any, width: int = 120) -> str:
     text = str(value).replace("\n", "\\n")
     return text if len(text) <= width else text[: width - 1] + ""
 
+def fmt_value(value: Any) -> str:
+    if isinstance(value, float):
+        text = f"{value:.3f}".rstrip("0").rstrip(".")
+        return text or "0"
+    return str(value)
+
 
 def print_persona(self_data: dict[str, Any] | None, updated_at: str = "") -> None:
     if self_data is None:
@@ -120,8 +126,8 @@ def print_persona(self_data: dict[str, Any] | None, updated_at: str = "") -> Non
     for name, trait in personality.items():
         if isinstance(trait, dict):
             print(
-                f"  {name:<12} current={trait.get('current')} "
-                f"base={trait.get('base')} confidence={trait.get('confidence')} "
+                f"  {name:<12} current={fmt_value(trait.get('current'))} "
+                f"base={fmt_value(trait.get('base'))} confidence={fmt_value(trait.get('confidence'))} "
                 f"evidence={len(trait.get('evidence') or [])}"
             )
         else:
@@ -129,19 +135,19 @@ def print_persona(self_data: dict[str, Any] | None, updated_at: str = "") -> Non
     print("Emotion:")
     emotion = self_data.get("emotion") or {}
     if emotion:
-        print("  " + ", ".join(f"{k}={v}" for k, v in emotion.items()))
+        print("  " + ", ".join(f"{k}={fmt_value(v)}" for k, v in emotion.items()))
     else:
         print("  <empty>")
     values = self_data.get("values") or {}
     if values:
         print("Values:")
-        print("  " + ", ".join(f"{k}={v}" for k, v in values.items()))
+        print("  " + ", ".join(f"{k}={fmt_value(v)}" for k, v in values.items()))
     goals = self_data.get("active_goals") or []
     print(f"Active goals: {len(goals)}")
     for goal in goals[:8]:
         print(
             f"  - {goal.get('title', '')} "
-            f"status={goal.get('status', '')} priority={goal.get('priority', '')}"
+            f"status={goal.get('status', '')} priority={fmt_value(goal.get('priority', ''))}"
         )
     print("=" * 72)
 
