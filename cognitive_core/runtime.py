@@ -63,6 +63,7 @@ class CognitiveCore:
                     event.to_dict(),
                     self.config.get("available_tools", []),
                     str(self.config.get("persona_prompt", "")),
+                    event.metadata.get("conversation_history", []),
                 )
                 llm = self.llm
                 if not hasattr(llm, "decide"):

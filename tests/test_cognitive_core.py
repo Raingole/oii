@@ -232,6 +232,31 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
         for intent in ("observe", "request_confirmation", "schedule"):
             self.assertEqual(validate_decision({"intent": intent})["intent"], intent)
 
+    async def test_llm_prompt_includes_conversation_history(self):
+        captured = {}
+
+        class CapturingLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                captured["prompt"] = prompt
+                captured["context"] = context
+                return {"intent": "reply", "message": "ok", "risk_level": "low"}
+
+        self.core.config["llm_enabled"] = True
+        self.core.llm = CapturingLLM()
+        event = CognitiveEvent.create(
+            "qq",
+            "message",
+            "qq:1",
+            "agent",
+            {"text": "继续"},
+            "qq:1",
+            metadata={"conversation_history": [{"role": "user", "content": "上一句"}, {"role": "assistant", "content": "上一答"}]},
+        )
+        await self.core.process_event(event)
+        self.assertIn("Recent conversation", captured["prompt"])
+        self.assertIn("上一句", captured["prompt"])
+        self.assertIn("上一答", captured["prompt"])
+
     async def test_official_actor_id_survives_shared_session_identity(self):
         # Official QQ uses the same memory/session key for a shared bot, but
         # the delivery target must stay the real user_openid supplied by the

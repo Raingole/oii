@@ -10,7 +10,7 @@ from typing import Any
 from config.logger import setup_logging
 from core.agent_pipeline import AgentPipeline
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
-from core.utils.dialogue import Dialogue
+from core.utils.dialogue import Dialogue, Message
 from jinja2 import Template
 from cognitive_core.client import CognitiveClient
 from urllib.error import URLError, HTTPError
@@ -163,6 +163,13 @@ class QQAgent:
             except Exception as exc:
                 self.logger.bind(tag=TAG).warning(f"Cognitive tool catalog refresh failed: {exc}")
         session = self._get_session(session_key)
+        conversation_history = []
+        for message in session.dialogue.get_llm_dialogue():
+            role = str(message.get("role", ""))
+            content = message.get("content")
+            if role in {"user", "assistant"} and content:
+                conversation_history.append({"role": role, "content": str(content)})
+        conversation_history = conversation_history[-12:]
         async with session.lock:
             if not source_event_id:
                 meta = event_metadata or {}
@@ -176,7 +183,7 @@ class QQAgent:
                     actor_id = str((event_metadata or {}).get("actor_id") or f"qq:{external_id}")
                     if not actor_id.startswith("qq:"):
                         actor_id = f"qq:{actor_id}"
-                    event = self.controller.event_router.build("qq", "message", actor_id, "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", **(event_metadata or {})})
+                    event = self.controller.event_router.build("qq", "message", actor_id, "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", "conversation_history": conversation_history, **(event_metadata or {})})
                     result = await self.controller.event_router.route(event)
                     messages = [a.get("payload", {}).get("text", "") for a in result.get("actions", []) if a.get("type") == "send_message"]
                     dispatched = result.get("dispatched", [])
@@ -185,7 +192,12 @@ class QQAgent:
                     # succeeded ActionResult means that a reply was really
                     # delivered by a Controller executor.
                     handled = bool(result.get("duplicate")) or cognitive_delivery_confirmed(dispatched)
-                    return ReplyResult(messages[0] if messages else "", handled, dispatched, event.event_id)
+                    reply_text = messages[0] if messages else ""
+                    if handled and not result.get("duplicate"):
+                        session.dialogue.put(Message(role="user", content=text))
+                        if reply_text:
+                            session.dialogue.put(Message(role="assistant", content=reply_text))
+                    return ReplyResult(reply_text, handled, dispatched, event.event_id)
                 except Exception as exc:
                     self.logger.bind(tag=TAG).warning(f"Cognitive router unavailable; falling back to legacy pipeline: {exc}")
             if self.cognitive_client is not None:
