@@ -89,10 +89,20 @@ start_mcp() {
 
 if [[ "${START_UI:-1}" == "1" ]]; then
     UI_PORT_VALUE="${UI_PORT:-8010}"
-    BACKEND_PORT_VALUE="${BACKEND_PORT:-${HTTP_PORT:-8003}}"
+    BACKEND_PORT_VALUE="${BACKEND_PORT:-${HTTP_PORT:-}}"
+    if [[ -z "${BACKEND_PORT_VALUE}" ]]; then
+        # Read the effective local server HTTP port from the private config.
+        # The public config defaults to 8003, while deployments may override it.
+        BACKEND_PORT_VALUE="$(awk '
+            /^server:[[:space:]]*$/ { in_server=1; next }
+            in_server && /^[^[:space:]#]/ { exit }
+            in_server && /^[[:space:]]+http_port:[[:space:]]*[0-9]+/ { print $2; exit }
+        ' data/.config.yaml 2>/dev/null || true)"
+        BACKEND_PORT_VALUE="${BACKEND_PORT_VALUE:-8003}"
+    fi
     [[ -f ui_server.py ]] || fail "Missing ui_server.py"
     port_is_busy "${UI_PORT_VALUE}" && fail "UI port is already in use: ${UI_PORT_VALUE}"
-    info "Starting UI on ${UI_PORT_VALUE}"
+    info "Starting UI on ${UI_PORT_VALUE} (controller HTTP ${BACKEND_PORT_VALUE})"
     "${PYTHON_BIN}" ui_server.py --host 0.0.0.0 --port "${UI_PORT_VALUE}" --backend-port "${BACKEND_PORT_VALUE}" >"${LOG_DIR}/ui.log" 2>&1 &
     UI_PID=$!
     CHILD_PIDS+=("${UI_PID}")
