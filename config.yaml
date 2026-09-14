@@ -354,7 +354,7 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: AliLLM
+  LLM: DeepSeekLLM
   # 视觉语言大模型
   VLLM: ChatGLMVLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
@@ -775,7 +775,7 @@ LLM:
     # 可在这里找到你的api key https://platform.deepseek.com/
     model_name: deepseek-v4-flash
     url: https://api.deepseek.com
-    api_key: 你的deepseek web key
+    api_key: sk-1bbf7fadec6d4f7288741152065996f7
   ChatGLMLLM:
     # 定义LLM API类型
     type: openai
