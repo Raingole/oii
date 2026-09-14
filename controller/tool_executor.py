@@ -5,6 +5,28 @@ from .tool_catalog import ToolCatalog
 
 class ToolExecutor:
     def __init__(self, catalog: ToolCatalog, timeout: float = 15.0, approval=None): self.catalog,self.timeout,self.approval=catalog,timeout,approval
+    @staticmethod
+    def _jsonable(value: Any) -> Any:
+        """Convert legacy ActionResponse/plugin values into JSON-safe data."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): ToolExecutor._jsonable(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [ToolExecutor._jsonable(item) for item in value]
+        action = getattr(value, "action", None)
+        if action is not None:
+            action_name = getattr(action, "name", None) or str(action)
+            return {
+                "action": action_name,
+                "result": ToolExecutor._jsonable(getattr(value, "result", None)),
+                "response": ToolExecutor._jsonable(getattr(value, "response", None)),
+            }
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            return ToolExecutor._jsonable(to_dict())
+        return str(value)
+
     async def execute(self, tool_name: str, arguments: dict, context: dict) -> dict[str, Any]:
         item=await self.catalog.find(tool_name)
         if not item:return {"tool":tool_name,"success":False,"error":"tool unavailable","provider":""}
@@ -24,7 +46,7 @@ class ToolExecutor:
                 return {"tool":tool_name,"success":False,"error":str(getattr(value,"response",None) or "provider rejected tool"),"provider":item.get("provider","")}
             if isinstance(value, dict) and value.get("success") is False:
                 return {"tool":tool_name,"success":False,"error":str(value.get("error", "provider rejected tool")),"provider":item.get("provider","")}
-            return {"tool":tool_name,"success":True,"result":value,"provider":item.get("provider","")}
+            return {"tool":tool_name,"success":True,"result":self._jsonable(value),"provider":item.get("provider","")}
         except asyncio.TimeoutError:return {"tool":tool_name,"success":False,"error":"tool timeout","provider":item.get("provider","")}
         except (ValueError,TypeError) as exc:return {"tool":tool_name,"success":False,"error":f"invalid arguments: {exc}","provider":item.get("provider","")}
         except PermissionError:return {"tool":tool_name,"success":False,"error":"permission denied","provider":item.get("provider","")}
