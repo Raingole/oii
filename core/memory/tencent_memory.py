@@ -202,10 +202,10 @@ class TencentMemoryAdapter(MemoryService):
         )
         try:
             messages = []
-            if _text(user_text).strip():
-                messages.append({"role": "user", "content": _text(user_text)})
-            if _text(assistant_text).strip():
-                messages.append({"role": "assistant", "content": _text(assistant_text)})
+            if _as_text(user_text).strip():
+                messages.append({"role": "user", "content": _as_text(user_text)})
+            if _as_text(assistant_text).strip():
+                messages.append({"role": "assistant", "content": _as_text(assistant_text)})
             if not messages:
                 return {"accepted_ids": [], "total_count": 0}
             result = self._post(
