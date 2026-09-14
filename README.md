@@ -35,7 +35,7 @@ QQ 入口只负责平台协议适配，业务处理统一进入 `QQAgent` 和公
 ## 启动
 
 ```bash
-./setup-and-start.sh
+./set-and-start.sh
 ```
 
 服务器运行前会读取：
@@ -130,12 +130,27 @@ C:\Users\你的用户名\AppData\Local\XiaozhiDesktopControl\config.json
 
 ```bash
 git pull origin main
-./setup-and-start.sh
+./set-and-start.sh
 ```
 
 不要把 `data/.config.yaml`、AppSecret、API Key、邮箱授权码或其他 Token 提交到 Git。
 
 ## 项目定位
+
+### Cognitive Core（可配置认知主路径）
+
+仓库现已包含独立的 `cognitive_core/` 和 Controller-side `controller/`。启用 `config.yaml`/`data/.config.yaml` 的 `cognitive_core.enabled` 后，QQ/NapCat 消息和 ESP32 ASR 文本通过统一 `CognitiveEvent` 进入 Event Router；Core 只生成 `Action`，持久化到 Action Outbox，由 Controller Dispatcher 执行 QQ、ESP32 或 MCP 动作，结果再以 `action_result` Event 回流。关闭开关时保留旧 Agent Pipeline。
+
+独立 Core 可用以下命令运行：
+
+```powershell
+$env:COGNITIVE_MEMORY_BACKEND="local"
+python -m cognitive_core.main
+```
+
+生产配置支持 `TENCENT_MEMORY_URL`/`TENCENT_MEMORY_API_KEY` 环境变量覆盖，也会读取现有 `data/.config.yaml` 的 `tencent_memory_*` scope。Memory 不可用时使用明确的本地 fallback。API 默认端口 8010，`/events`、`/state`、`/heartbeat/run-once` 受 `COGNITIVE_CORE_API_TOKEN` 保护（未设置 token 时为本地开发兼容模式）。
+
+当前真实接入与验证状态见：`docs/final-architecture.md`、`docs/integration-guide.md`、`docs/testing-report.md`。
 
 OII 是一个个人智能中控，不是单一聊天机器人。它把消息入口、设备、记忆和工具统一到一个 Agent 中，使用户可以从不同终端访问相同的能力。
 
@@ -191,4 +206,4 @@ NapCat OneBot connected
 git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt
-./setup-and-start.sh
+./set-and-start.sh

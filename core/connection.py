@@ -489,6 +489,17 @@ class ConnectionHandler:
         # 不需要绑定，继续处理消息
 
         if isinstance(message, str):
+            # New ESP32 firmware may acknowledge controller actions using a
+            # JSON control frame. Unknown/legacy text continues unchanged.
+            try:
+                control = json.loads(message)
+            except (TypeError, ValueError):
+                control = None
+            if isinstance(control, dict) and control.get("type") in {"action_result", "device_action_result"} and control.get("action_id"):
+                router = getattr(self.server, "event_router", None)
+                if router is not None:
+                    await router.handle_device_action_result(str(control["action_id"]), str(control.get("status", "failed")), str(self.device_id or control.get("device_id", "")), control)
+                return
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
             # 空闲连接不把音频交给 ASR，但仍保留 WebSocket 下行能力。
@@ -1936,7 +1947,7 @@ class ConnectionHandler:
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
 
-    async def notify_text(self, text):
+    async def notify_text(self, text, action_id: str = ""):
         """通知下发：空闲立即播报（独立会话），对话中缓冲到本轮回复末尾。"""
         if not self.websocket or self.stop_event.is_set():
             raise RuntimeError("设备连接不可用")
@@ -2025,6 +2036,8 @@ class ConnectionHandler:
         await conversation.stop_processing()
         self.client_abort = True
         self.close_after_chat = False
+        if action_id:
+            self._cognitive_action_id = action_id
         self.reset_audio_states()
         while True:
             try:

@@ -1,6 +1,8 @@
 """QQ adapter over the shared Agent/Tool/MCP pipeline."""
 
 import asyncio
+import hashlib
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,8 @@ from core.agent_pipeline import AgentPipeline
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.utils.dialogue import Dialogue
 from jinja2 import Template
+from cognitive_core.client import CognitiveClient
+from urllib.error import URLError, HTTPError
 
 TAG = __name__
 
@@ -19,6 +23,14 @@ class QQConversation:
     dialogue: Dialogue
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_tool_result: Any = None
+
+@dataclass
+class ReplyResult:
+    text: str
+    handled_by_cognitive: bool
+    action_results: list[dict[str, Any]] = field(default_factory=list)
+    event_id: str = ""
+    trace_id: str = ""
 
 
 class QQAgentContext:
@@ -69,6 +81,8 @@ class QQAgent:
         self.context: QQAgentContext | None = None
         self.pipeline = AgentPipeline(config)
         self.controller = controller
+        cc = config.get("cognitive_core", {}) if isinstance(config.get("cognitive_core", {}), dict) else {}
+        self.cognitive_client = CognitiveClient(str(cc.get("url", "http://127.0.0.1:8010")), float(cc.get("timeout", 3))) if cc.get("enabled", False) else None
 
     def _build_prompt(self, base_prompt: str) -> str:
         """Apply the shared project prompt structure without rewriting the user's prompt."""
@@ -118,11 +132,41 @@ class QQAgent:
             self.sessions[key] = session
         return session
 
-    async def reply(self, session_key: str, text: str) -> str:
+    async def reply_result(self, session_key: str, text: str, source_event_id: str = "", event_metadata: dict[str, Any] | None = None) -> ReplyResult:
         self.logger.bind(tag=TAG).info(f"QQ agent start: session={session_key}, text_length={len(text or '')}")
         await self.start()
         session = self._get_session(session_key)
         async with session.lock:
+            if not source_event_id:
+                meta = event_metadata or {}
+                bucket = meta.get("timestamp_bucket", int(time.time() // 300))
+                external = session_key.rsplit(":", 1)[-1] if session_key else "owner"
+                normalized = " ".join(str(text or "").split()).casefold()
+                source_event_id = "fallback:" + hashlib.sha256(f"qq|{external}|{session_key}|{normalized}|{bucket}".encode()).hexdigest()
+            if getattr(self.controller, "event_router", None) is not None:
+                try:
+                    external_id = session_key.rsplit(":", 1)[-1] if session_key else "owner"
+                    event = self.controller.event_router.build("qq", "message", f"qq:{external_id}", "agent", source_event_id=source_event_id, content={"text": text}, session_id=session_key, metadata={"platform": "napcat", **(event_metadata or {})})
+                    result = await self.controller.event_router.route(event)
+                    messages = [a.get("payload", {}).get("text", "") for a in result.get("actions", []) if a.get("type") == "send_message"]
+                    return ReplyResult(messages[0] if messages else "", bool(result.get("dispatched")) or bool(result.get("duplicate")), result.get("dispatched", []), event.event_id)
+                except Exception as exc:
+                    self.logger.bind(tag=TAG).warning(f"Cognitive router unavailable; falling back to legacy pipeline: {exc}")
+            if self.cognitive_client is not None:
+                try:
+                    external_id = session_key.rsplit(":", 1)[-1] if session_key else "owner"
+                    event = {
+                        "event_id": f"qq:{source_event_id}" if source_event_id else "",
+                        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                        "source": "qq", "type": "message", "actor_id": f"qq:{external_id}", "target_id": "agent",
+                        "session_id": session_key, "content": {"text": text}, "metadata": {},
+                    }
+                    result = await self.cognitive_client.process(event)
+                    actions = result.get("actions", [])
+                    messages = [a.get("payload", {}).get("text", "") for a in actions if a.get("type") == "send_message"]
+                    if messages: return ReplyResult(messages[0], True, [], event.get("event_id", ""))
+                except (URLError, HTTPError, TimeoutError, OSError, ValueError) as exc:
+                    self.logger.bind(tag=TAG).warning(f"Cognitive Core unavailable; falling back to legacy pipeline: {exc}")
             self.context.dialogue = session.dialogue
             self.context.session_id = session_key
             self.context.turn_id += 1
@@ -136,4 +180,8 @@ class QQAgent:
             answer = await self.pipeline.process(self.context, text, session_key)
             session.last_tool_result = self.context.last_tool_result
             self.logger.bind(tag=TAG).info(f"QQ agent finish: session={session_key}, answer_length={len(answer or '')}")
-            return answer
+            return ReplyResult(answer, False, [], source_event_id)
+
+    async def reply(self, session_key: str, text: str, source_event_id: str = "", event_metadata: dict[str, Any] | None = None) -> str:
+        """Legacy compatibility API; request state remains in the return value."""
+        return (await self.reply_result(session_key, text, source_event_id, event_metadata)).text

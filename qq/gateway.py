@@ -192,6 +192,8 @@ class QQGateway:
             return
         self.logger.bind(tag=TAG).info(f"QQ private message received: user_id={message.user_id}, message_id={message.message_id}")
         self.logger.bind(tag=TAG).info(f"QQ pipeline dispatch: session={message.session_key}, text_length={len(message.message)}")
-        answer = await self.agent.reply(message.session_key, message.message)
+        reply = await self.agent.reply_result(message.session_key, message.message, message.message_id or "") if hasattr(self.agent, "reply_result") else None
+        answer = reply.text if reply else await self.agent.reply(message.session_key, message.message, message.message_id or "")
         self.logger.bind(tag=TAG).info(f"QQ pipeline completed: session={message.session_key}, reply_length={len(answer or '')}")
-        await self.service.send_private_message(message.user_id, answer)
+        if not (reply and reply.handled_by_cognitive):
+            await self.service.send_private_message(message.user_id, answer)

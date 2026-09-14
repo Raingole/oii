@@ -83,12 +83,13 @@ def format_mail_notification(payload: dict[str, Any]) -> tuple[str, bool, dict[s
 
 
 class MailPilotWebhookHandler:
-    def __init__(self, config: dict[str, Any], qq_service):
+    def __init__(self, config: dict[str, Any], qq_service, event_router: Any = None):
         self.logger = setup_logging(config)
         mailpilot = config.get("mailpilot", {})
         self.secret = _text(os.environ.get("MAILPILOT_WEBHOOK_SECRET") or mailpilot.get("webhook_secret"))
         self.target_qq = _text(os.environ.get("MAILPILOT_TARGET_QQ") or mailpilot.get("target_qq") or config.get("qq", {}).get("owner_qq"))
         self.qq_service = qq_service
+        self.event_router = event_router
         self.ttl_seconds = int(mailpilot.get("dedup_ttl_seconds", 900))
         self.max_cache = int(mailpilot.get("dedup_cache_size", 2048))
         self._seen: OrderedDict[str, float] = OrderedDict()
@@ -130,18 +131,30 @@ class MailPilotWebhookHandler:
         if not self.target_qq:
             self._seen.pop(key, None)
             return web.json_response({"ok": False, "error": "target QQ not configured"}, status=503)
-        task = asyncio.create_task(self._send(message, fields, is_code))
+        source_id = next((_text(payload.get(name)) for name in ("message_id", "messageId", "email_id", "uid", "id") if _text(payload.get(name))), "")
+        fields["source_event_id"] = source_id
+        task = asyncio.create_task(self._send(key, message, fields, is_code))
         self._tasks.add(task)
         task.add_done_callback(self._task_done)
         return web.json_response({"ok": True, "accepted": True}, status=202)
 
-    async def _send(self, message: str, fields: dict[str, str], is_code: bool) -> None:
+    async def _send(self, dedup_key: str, message: str, fields: dict[str, str], is_code: bool) -> None:
         try:
             ok = await self.qq_service.send_private_message(self.target_qq, message)
+            if ok and self.event_router:
+                await self.event_router.route(self.event_router.build("email", "notification_sent", fields.get("sender", "email"), "agent", source_event_id=fields.get("source_event_id") or dedup_key, content={"subject": fields.get("subject", ""), "category": fields.get("category", ""), "is_code": is_code}, session_id=f"mail:{dedup_key}", metadata={"target_qq": self.target_qq, "source_event_id": fields.get("source_event_id", "")}))
+            if not ok:
+                self._seen.pop(dedup_key, None)
             masked = fields["code"] or "none"
             self.logger.bind(tag=TAG).info("Mailpilot QQ push {}: verification={}, code={}", "succeeded" if ok else "failed", is_code, masked)
         except Exception as exc:
+            self._seen.pop(dedup_key, None)
             self.logger.bind(tag=TAG).error("Mailpilot QQ push raised an error: {}", exc)
+
+    async def close(self) -> None:
+        """Wait for accepted notifications; failed deliveries are retryable."""
+        if self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
     def _task_done(self, task: asyncio.Task) -> None:
         self._tasks.discard(task)

@@ -41,10 +41,11 @@ def format_sms_notification(event: SmsEvent) -> str:
 
 
 class SmsWebhookHandler:
-    def __init__(self, config: dict, qq_service: Any, logger: Any):
+    def __init__(self, config: dict, qq_service: Any, logger: Any, event_router: Any = None):
         sms_config = config.get("sms", {})
         self.qq_service = qq_service
         self.logger = logger
+        self.event_router = event_router
         self.token = str(sms_config.get("webhook_token", "") or "")
         self.target_qq = str(
             sms_config.get("target_qq")
@@ -123,5 +124,7 @@ class SmsWebhookHandler:
                 return web.json_response({"ok": False, "error": "delivery_failed"}, status=503)
             self._processed[event.event_id] = now
             self._processed.move_to_end(event.event_id)
+            if self.event_router:
+                await self.event_router.route(self.event_router.build("sms", "notification_sent", event.sender, "agent", source_event_id=event.event_id, content={"body": event.body, "code_present": True}, metadata={"target_qq": self.target_qq}))
             self.logger.bind(tag=TAG).info("SMS notification sent to QQ")
             return web.json_response({"ok": True})

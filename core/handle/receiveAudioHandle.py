@@ -59,6 +59,25 @@ async def startToChat(conn: "ConnectionHandler", text):
         conn.logger.bind(tag=TAG).info("当前没有活动 ConversationSession，忽略对话输入")
         return
 
+    # Optional Cognitive Core main path. Protocol parsing and TTS remain in
+    # Controller; cognition only returns Actions to the shared dispatcher.
+    router = getattr(getattr(conn, "server", None), "event_router", None)
+    if router is not None and isinstance(conn.config.get("cognitive_core", {}), dict) and conn.config.get("cognitive_core", {}).get("enabled", False):
+        try:
+            source_event_id = f"{conn.session_id}:turn:{getattr(conn, 'active_turn_id', '')}:{getattr(conn, 'sentence_id', '')}"
+            event = router.build("esp32", "speech", str(conn.device_id or "esp32"), "self", source_event_id=source_event_id, content={"text": str(text)}, session_id=str(conn.session_id), metadata={"device_id": str(conn.device_id or "")})
+            result = await router.route(event)
+            from controller.cognitive_fallback import device_output_succeeded
+            if device_output_succeeded(result):
+                return
+            pending_device = next((x for x in result.get("dispatched", []) if x.get("status") == "pending"), None)
+            if pending_device and pending_device.get("action_id"):
+                confirmation = await router.wait_for_device_confirmation(pending_device["action_id"])
+                if confirmation and confirmation.status == "succeeded" and confirmation.result and confirmation.result.get("output_sent") is True:
+                    return
+        except Exception as exc:
+            conn.logger.bind(tag=TAG).warning(f"Cognitive ESP32 path failed; using legacy pipeline: {exc}")
+
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     actual_text = text

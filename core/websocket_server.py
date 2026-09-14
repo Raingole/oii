@@ -36,6 +36,8 @@ from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 from core.memory import MemoryManager
+from controller.runtime import ControllerRuntime
+from cognitive_core.llm import ExistingProviderLLM
 
 TAG = __name__
 
@@ -48,6 +50,10 @@ class WebSocketServer:
         self.connections = {}
         self.http_server = None
         self.memory_manager = MemoryManager(config)
+        cc_config = config.get("cognitive_core", {}) if isinstance(config.get("cognitive_core", {}), dict) else {}
+        self.cognitive_runtime = ControllerRuntime(config, self.memory_manager) if cc_config.get("enabled", False) else None
+        self.event_router = self.cognitive_runtime.router if self.cognitive_runtime else None
+        self.action_dispatcher = self.cognitive_runtime.dispatcher if self.cognitive_runtime else None
         # Shared output adapter used by server plugins such as qq.send_to_owner.
         self.qq_service = None
         # Shared by server-side tools so desktop control does not depend on an
@@ -66,6 +72,8 @@ class WebSocketServer:
         self._vad = modules["vad"] if "vad" in modules else None
         self._asr = modules["asr"] if "asr" in modules else None
         self._llm = modules["llm"] if "llm" in modules else None
+        if self.cognitive_runtime and self._llm and self.cognitive_runtime.core.config.get("llm_enabled", False):
+            self.cognitive_runtime.core.llm = ExistingProviderLLM(self._llm)
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
 
@@ -88,6 +96,13 @@ class WebSocketServer:
                 if old.websocket:
                     asyncio.create_task(old.close(old.websocket))
             self.connections[conn.device_id] = conn
+            if self.cognitive_runtime:
+                body = self.cognitive_runtime.core.self_model.body
+                body[str(conn.device_id)] = {"id": str(conn.device_id), "ownership": "self", "capabilities": ["hearing", "speaking", "display"], "online": True}
+                self.cognitive_runtime.core.self_model.body = body
+                self.cognitive_runtime.core.store.save_self(self.cognitive_runtime.core.agent_id, self.cognitive_runtime.core.self_model)
+                if self.event_router:
+                    asyncio.create_task(self.event_router.route(self.event_router.build("esp32", "body_online", str(conn.device_id), "self", source_event_id=f"{conn.device_id}:{getattr(conn, 'session_id', '')}:online")))
             self.logger.bind(tag=TAG).info(f"设备已注册通知连接: {conn.device_id}")
             if self.http_server is not None:
                 asyncio.create_task(self.http_server.deliver_pending_notifications(conn))
@@ -95,6 +110,11 @@ class WebSocketServer:
     def unregister_connection(self, conn):
         if conn.device_id and self.connections.get(conn.device_id) is conn:
             self.connections.pop(conn.device_id, None)
+            if self.cognitive_runtime:
+                body = self.cognitive_runtime.core.self_model.body.get(str(conn.device_id))
+                if body: body["online"] = False; self.cognitive_runtime.core.store.save_self(self.cognitive_runtime.core.agent_id, self.cognitive_runtime.core.self_model)
+                if self.event_router:
+                    asyncio.create_task(self.event_router.route(self.event_router.build("esp32", "body_offline", str(conn.device_id), "self", source_event_id=f"{conn.device_id}:{getattr(conn, 'session_id', '')}:offline")))
 
     def get_connection(self, device_id):
         return self.connections.get(device_id)

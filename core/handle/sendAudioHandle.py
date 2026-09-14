@@ -300,6 +300,9 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None, turn_id=
     }
     if text is not None:
         message["text"] = textUtils.check_emoji(text)
+    action_id = getattr(conn, "_cognitive_action_id", "")
+    if action_id:
+        message["action_id"] = action_id
 
     # TTS播放结束
     if state == "stop":

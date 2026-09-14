@@ -68,10 +68,11 @@ class SimpleHttpServer:
                 app = web.Application()
                 qq_service = getattr(self.websocket_server, "qq_service", None)
                 if qq_service is not None:
-                    self.mailpilot_webhook = MailPilotWebhookHandler(self.config, qq_service)
+                    event_router = getattr(self.websocket_server, "event_router", None)
+                    self.mailpilot_webhook = MailPilotWebhookHandler(self.config, qq_service, event_router)
                     app.router.add_post("/webhook/mailpilot", self.mailpilot_webhook.handle)
                     app.router.add_post("/webhook/mailpilot/{token}", self.mailpilot_webhook.handle)
-                    self.sms_webhook = SmsWebhookHandler(self.config, qq_service, self.logger)
+                    self.sms_webhook = SmsWebhookHandler(self.config, qq_service, self.logger, event_router)
                     app.router.add_post("/api/events/sms", self.sms_webhook.handle)
 
                 if not read_config_from_api:

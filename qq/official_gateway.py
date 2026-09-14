@@ -185,8 +185,10 @@ class QQOfficialGateway:
             return
         session_id = self.memory_identity or user_id
         session_key = f"qq:private:{session_id}"
-        answer = await self.agent.reply(session_key, text)
-        await self._send_c2c_message(user_id, answer, message_id)
+        reply = await self.agent.reply_result(session_key, text, message_id, {"platform": "official"}) if hasattr(self.agent, "reply_result") else None
+        answer = reply.text if reply else await self.agent.reply(session_key, text, message_id, {"platform": "official"})
+        if not (reply and reply.handled_by_cognitive):
+            await self._send_c2c_message(user_id, answer, message_id)
 
     async def _send_c2c_message(self, user_openid: str, text: str, message_id: str) -> None:
         if not self.websocket:

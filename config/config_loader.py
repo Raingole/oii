@@ -2,14 +2,21 @@ import os
 import asyncio
 import yaml
 from collections.abc import Mapping
-from config.manage_api_client import (
-    init_service,
-    get_server_config,
-    get_agent_models,
-    get_correct_words,
-    DeviceNotFoundException,
-    DeviceBindException,
-)
+try:
+    from config.manage_api_client import (
+        init_service, get_server_config, get_agent_models, get_correct_words,
+        DeviceNotFoundException, DeviceBindException,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "httpx":
+        raise
+    class DeviceNotFoundException(Exception): pass
+    class DeviceBindException(Exception):
+        def __init__(self, bind_code): self.bind_code = bind_code
+    def init_service(config): raise RuntimeError("Manager API requires optional dependency httpx")
+    async def get_server_config(): raise RuntimeError("Manager API requires optional dependency httpx")
+    async def get_agent_models(*args, **kwargs): raise RuntimeError("Manager API requires optional dependency httpx")
+    async def get_correct_words(*args, **kwargs): return None
 
 
 def get_project_dir():
@@ -56,6 +63,15 @@ async def load_config():
         sms["webhook_token"] = os.environ["SMS_WEBHOOK_TOKEN"]
     if os.environ.get("SMS_TARGET_QQ"):
         sms["target_qq"] = os.environ["SMS_TARGET_QQ"]
+    cognitive = config.setdefault("cognitive_core", {})
+    for env_name, config_name in {
+        "COGNITIVE_CORE_ENABLED": "enabled", "COGNITIVE_CORE_URL": "url", "COGNITIVE_DB_PATH": "db_path",
+        "COGNITIVE_CORE_API_TOKEN": "api_token", "TENCENT_MEMORY_URL": "tencent_memory_base_url",
+        "TENCENT_MEMORY_API_KEY": "tencent_memory_api_key",
+    }.items():
+        if os.environ.get(env_name) is not None:
+            value = os.environ[env_name]
+            cognitive[config_name] = value.lower() in {"1", "true", "yes", "on"} if config_name == "enabled" else value
     # 初始化目录
     ensure_directories(config)
 

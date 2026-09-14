@@ -1,7 +1,25 @@
 import os
 import sys
 import asyncio
-from loguru import logger
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    import logging
+    class _FallbackLogger:
+        def __init__(self, name="oii"): self._logger = logging.getLogger(name)
+        def bind(self, **kwargs): return self
+        def configure(self, **kwargs): return None
+        def remove(self, *args, **kwargs): return None
+        def add(self, *args, **kwargs): return None
+        def _write(self, level, message, *args, **kwargs):
+            try: self._logger.log(level, str(message).format(*args, **kwargs))
+            except Exception: self._logger.log(level, str(message))
+        def debug(self, message, *args, **kwargs): self._write(logging.DEBUG, message, *args, **kwargs)
+        def info(self, message, *args, **kwargs): self._write(logging.INFO, message, *args, **kwargs)
+        def warning(self, message, *args, **kwargs): self._write(logging.WARNING, message, *args, **kwargs)
+        def error(self, message, *args, **kwargs): self._write(logging.ERROR, message, *args, **kwargs)
+        def exception(self, message, *args, **kwargs): self._write(logging.ERROR, message, *args, **kwargs)
+    logger = _FallbackLogger()
 from config.config_loader import load_config
 from config.settings import check_config_file
 from core.utils.cache.manager import cache_manager, CacheType

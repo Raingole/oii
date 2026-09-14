@@ -2,7 +2,14 @@ import sys
 import uuid
 import signal
 import asyncio
-from aioconsole import ainput
+import json
+import hashlib
+try:
+    from aioconsole import ainput
+except ModuleNotFoundError:
+    async def ainput(prompt: str = ""):
+        """Optional dependency fallback; stdin monitoring is non-critical."""
+        return await asyncio.to_thread(input, prompt)
 from config.settings import load_config
 from config.logger import setup_logging
 from core.utils.util import get_local_ip, validate_mcp_endpoint
@@ -12,6 +19,8 @@ from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
 from qq.gateway import QQGateway
 from qq.official_gateway import QQOfficialGateway
+from controller.tool_catalog import ToolCatalog
+from controller.tool_executor import ToolExecutor
 
 TAG = __name__
 logger = setup_logging()
@@ -72,15 +81,71 @@ async def main():
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
-    ws_task = asyncio.create_task(ws_server.start())
+    ws_task = None
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config, ws_server)
     ws_server.http_server = ota_server
     ws_server.desktop_control = ota_server.desktop_control
-    ota_task = asyncio.create_task(ota_server.start())
+    ota_task = None
     qq_gateway = QQGateway(config, ws_server._llm, controller=ws_server)
     ws_server.qq_gateway = qq_gateway
+    if ws_server.action_dispatcher is not None:
+        async def _qq_executor(action):
+            target = str(action.get("target") or action.get("payload", {}).get("target") or "")
+            user_id = target.split(":", 1)[-1] if target.startswith("qq:") else target
+            if action.get("payload", {}).get("platform") == "official":
+                return await qq_official_gateway._send_c2c_message(user_id, str(action.get("payload", {}).get("text", "")), str(action.get("payload", {}).get("source_message_id", "")))
+            return await qq_gateway.service.send_private_message(user_id, str(action.get("payload", {}).get("text", "")))
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
+    if ws_server.action_dispatcher is not None:
+        class _DynamicProvider:
+            def __init__(self, getter, conn_getter=lambda: None): self.getter, self.conn_getter = getter, conn_getter
+            async def discover(self):
+                obj = self.getter()
+                if obj is None: return []
+                if hasattr(obj, "get_tools"): return obj.get_tools()
+                if hasattr(obj, "get_all_tools"): return obj.get_all_tools()
+                if hasattr(obj, "get_available_tools"): return obj.get_available_tools()
+                return []
+            async def execute(self, name, arguments, context):
+                obj = self.getter()
+                if obj is None: raise RuntimeError("tool provider offline")
+                if hasattr(obj, "execute"):
+                    return await obj.execute(self.conn_getter(), name, arguments)
+                if hasattr(obj, "execute_tool"): return await obj.execute_tool(name, arguments)
+                return await obj.call_tool(name, arguments)
+        catalog = ToolCatalog()
+        _context = lambda: getattr(qq_gateway.agent, "context", None)
+        catalog.register("server_mcp", _DynamicProvider(lambda: getattr(getattr(_context(), "func_handler", None), "server_mcp_executor", None), _context))
+        catalog.register("device_mcp", _DynamicProvider(lambda: next((getattr(c, "mcp_client", None) for c in ws_server.connections.values() if getattr(c, "mcp_client", None) is not None), None)))
+        catalog.register("plugins", _DynamicProvider(lambda: getattr(getattr(_context(), "func_handler", None), "tool_manager", None), _context))
+        catalog.register("desktop", _DynamicProvider(lambda: getattr(ws_server, "desktop_control", None)))
+        tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))
+        async def _esp_executor(action):
+            target = str(action.get("target") or action.get("payload", {}).get("device_id") or "")
+            conn = ws_server.connections.get(target) or (next(iter(ws_server.connections.values())) if ws_server.connections else None)
+            if conn is None: raise RuntimeError("ESP32 body is offline")
+            await conn.notify_text(str(action.get("payload", {}).get("text", "")), action_id=str(action.get("action_id", "")))
+            # notify_text only queues data in the ESP32 transport. Physical
+            # completion must arrive later with the matching action_id.
+            payload = action.get("payload", {})
+            payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            return {"device_id": str(conn.device_id), "status": "queued", "output_sent": False, "action_id": action.get("action_id"), "payload_hash": payload_hash}
+        ws_server.action_dispatcher.register("send_message", _qq_executor)
+        ws_server.action_dispatcher.register("speak", _esp_executor)
+        ws_server.action_dispatcher.register("display", _esp_executor)
+        async def _mcp_executor(action):
+            payload = action.get("payload", {})
+            tool_name = str(payload.get("tool", "")); arguments = payload.get("arguments", {})
+            result = await tool_executor.execute(tool_name, arguments, {"action": action, "event_id": action.get("event_id", ""), "approval_validated": bool(action.get("_approval_validated"))})
+            if not result.get("success"): raise RuntimeError(result.get("error", "tool failed"))
+            return result
+        ws_server.action_dispatcher.register("call_mcp", _mcp_executor)
+    if ws_server.cognitive_runtime:
+        await ws_server.cognitive_runtime.recover()
+        await ws_server.cognitive_runtime.start_heartbeat()
+    ws_task = asyncio.create_task(ws_server.start())
+    ota_task = asyncio.create_task(ota_server.start())
     qq_task = asyncio.create_task(qq_gateway.start())
     qq_official_task = asyncio.create_task(qq_official_gateway.start())
 
@@ -143,6 +208,8 @@ async def main():
     finally:
         # 停止全局GC管理器
         await gc_manager.stop()
+        if ws_server.cognitive_runtime:
+            await ws_server.cognitive_runtime.shutdown()
 
         # 取消所有任务（关键修复点）
         stdin_task.cancel()

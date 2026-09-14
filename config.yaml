@@ -75,6 +75,22 @@ qq_official:
   # C2C private-message intent.
   intents: 33554432
 
+# Optional isolated Cognitive Core. Disabled preserves the legacy pipeline.
+cognitive_core:
+  enabled: false
+  url: http://127.0.0.1:8010
+  timeout: 3
+  db_path: data/cognitive/cognitive.db
+  agent_id: central-controller
+  share_legacy_memory: true
+  action_timeout: 15
+  action_max_attempts: 3
+  api_token: ""
+  max_body_bytes: 262144
+  heartbeat_interval: 60
+  autonomous_action_enabled: false
+  llm_enabled: false
+
 # Android SMS webhook. The target falls back to qq.owner_qq when empty.
 # Prefer setting SMS_WEBHOOK_TOKEN and SMS_TARGET_QQ in the server environment.
 sms:
