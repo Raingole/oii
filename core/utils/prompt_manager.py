@@ -6,6 +6,8 @@
 import os
 import asyncio
 import threading
+import hashlib
+import json
 from pathlib import Path
 from typing import Dict, Any, TYPE_CHECKING
 
@@ -284,6 +286,31 @@ class PromptManager:
             self.logger.bind(tag=TAG).debug(f"获取到选择的语言: {language}")
 
             # 替换模板变量
+            cache_material = {
+                "prompt": user_prompt,
+                "device_id": device_id or "",
+                "client_ip": client_ip or "",
+                "date": today_date,
+                "weekday": today_weekday,
+                "lunar": lunar_date,
+                "location": local_address,
+                "weather": weather_info,
+                "language": language,
+                "context": self.context_data,
+                "args": args,
+                "kwargs": kwargs,
+            }
+            cache_digest = hashlib.sha256(
+                json.dumps(cache_material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:24]
+            device_cache_key = f"device_prompt:v3:{device_id or 'global'}:{cache_digest}"
+            cached_enhanced_prompt = self.cache_manager.get(
+                self.CacheType.DEVICE_PROMPT, device_cache_key
+            )
+            if cached_enhanced_prompt is not None:
+                self.logger.bind(tag=TAG).debug("using cached enhanced prompt")
+                return cached_enhanced_prompt
+
             template = Template(self.base_prompt_template)
             enhanced_prompt = template.render(
                 base_prompt=user_prompt,
@@ -301,7 +328,6 @@ class PromptManager:
                 *args,
                 **kwargs,
             )
-            device_cache_key = f"device_prompt:{device_id}"
             self.cache_manager.set(
                 self.CacheType.DEVICE_PROMPT, device_cache_key, enhanced_prompt
             )

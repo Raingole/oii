@@ -21,6 +21,12 @@ class GlobalCacheManager:
         self._global_lock = threading.RLock()
         self._last_cleanup = time.time()
         self._stats = {"hits": 0, "misses": 0, "evictions": 0, "cleanups": 0}
+        self._stats_by_cache: Dict[str, Dict[str, int]] = {}
+
+    def _record_lookup(self, cache_name: str, result: str) -> None:
+        self._stats[result] += 1
+        bucket = self._stats_by_cache.setdefault(cache_name, {"hits": 0, "misses": 0})
+        bucket[result] += 1
 
     @property
     def logger(self):
@@ -106,7 +112,7 @@ class GlobalCacheManager:
         cache_name = self._get_cache_name(cache_type, namespace)
 
         if cache_name not in self._caches:
-            self._stats["misses"] += 1
+            self._record_lookup(cache_name, "misses")
             return None
 
         cache = self._caches[cache_name]
@@ -114,7 +120,7 @@ class GlobalCacheManager:
 
         with self._locks[cache_name]:
             if key not in cache:
-                self._stats["misses"] += 1
+                self._record_lookup(cache_name, "misses")
                 return None
 
             entry = cache[key]
@@ -122,7 +128,7 @@ class GlobalCacheManager:
             # 检查过期
             if entry.is_expired():
                 del cache[key]
-                self._stats["misses"] += 1
+                self._record_lookup(cache_name, "misses")
                 return None
 
             # 更新访问信息
@@ -133,8 +139,25 @@ class GlobalCacheManager:
                 del cache[key]
                 cache[key] = entry
 
-            self._stats["hits"] += 1
+            self._record_lookup(cache_name, "hits")
             return entry.value
+
+    def stats(self) -> Dict[str, Any]:
+        """Return process-local cache metrics split by cache type."""
+        with self._global_lock:
+            by_cache = {}
+            for name, values in self._stats_by_cache.items():
+                total = values["hits"] + values["misses"]
+                by_cache[name] = {
+                    **values,
+                    "hit_rate": values["hits"] / total if total else 0.0,
+                }
+            total = self._stats["hits"] + self._stats["misses"]
+            return {
+                **self._stats,
+                "hit_rate": self._stats["hits"] / total if total else 0.0,
+                "by_cache": by_cache,
+            }
 
     def delete(self, cache_type: CacheType, key: str, namespace: str = "") -> bool:
         """删除缓存条目"""

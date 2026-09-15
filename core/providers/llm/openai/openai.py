@@ -70,6 +70,21 @@ class LLMProvider(LLMProviderBase):
         if model_key_msg:
             logger.bind(tag=TAG).error(model_key_msg)
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=custom_timeout)
+        self.capture_usage = bool(config.get("capture_usage", True))
+
+    def _log_usage(self, usage) -> None:
+        if usage is None:
+            return
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached_tokens = getattr(details, "cached_tokens", None) if details is not None else None
+        logger.bind(tag=TAG).info(
+            "LLM usage prompt_tokens={} cached_prompt_tokens={} completion_tokens={} total_tokens={}".format(
+                getattr(usage, "prompt_tokens", None),
+                cached_tokens,
+                getattr(usage, "completion_tokens", None),
+                getattr(usage, "total_tokens", None),
+            )
+        )
 
     @staticmethod
     def normalize_dialogue(dialogue):
@@ -97,6 +112,8 @@ class LLMProvider(LLMProviderBase):
             "messages": dialogue,
             "stream": True,
         }
+        if self.capture_usage:
+            request_params["stream_options"] = {"include_usage": True}
 
         # 添加可选参数,只有当参数不为None时才添加
         optional_params = {
@@ -123,6 +140,9 @@ class LLMProvider(LLMProviderBase):
                     content = getattr(delta, "content", "") if delta else ""
                 except IndexError:
                     content = ""
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    self._log_usage(usage)
                 if content:
                     if "<think>" in content:
                         is_active = False
@@ -144,6 +164,8 @@ class LLMProvider(LLMProviderBase):
             "stream": True,
             "tools": functions,
         }
+        if self.capture_usage:
+            request_params["stream_options"] = {"include_usage": True}
 
         optional_params = {
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
@@ -163,6 +185,9 @@ class LLMProvider(LLMProviderBase):
 
         try:
             for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    self._log_usage(usage)
                 if getattr(chunk, "choices", None):
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", "")

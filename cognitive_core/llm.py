@@ -77,19 +77,19 @@ class ExistingProviderLLM:
         self.provider = provider
         self.timeout = timeout
 
-    async def _raw_response(self, system: str, user: str) -> str:
+    async def _raw_response(self, system: str, user: str, session_id: str = "") -> str:
         def call() -> str:
-            if hasattr(self.provider, "response_no_stream"):
-                return str(self.provider.response_no_stream(system, user))
             if hasattr(self.provider, "response"):
                 result = self.provider.response(
-                    "",
+                    session_id,
                     [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
                 )
                 return "".join(str(part) for part in result)
+            if hasattr(self.provider, "response_no_stream"):
+                return str(self.provider.response_no_stream(system, user))
             raise LLMError("provider_has_no_response_method")
 
         if self.timeout and self.timeout > 0:
@@ -107,7 +107,12 @@ class ExistingProviderLLM:
 
     async def decide(self, prompt: str, context: dict[str, Any] | str, trace_id: str = "") -> dict[str, Any]:
         user = context if isinstance(context, str) else json.dumps(context, ensure_ascii=False, default=str)
-        raw = await self._raw_response(prompt, user)
+        session_id = ""
+        if isinstance(context, dict):
+            event = context.get("event")
+            event_session_id = event.get("session_id") if isinstance(event, dict) else ""
+            session_id = str(context.get("session_id") or event_session_id or "")
+        raw = await self._raw_response(prompt, user, session_id=session_id)
         return parse_decision(raw)
 
 

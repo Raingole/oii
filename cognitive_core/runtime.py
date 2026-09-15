@@ -68,14 +68,13 @@ class CognitiveCore:
                 llm = self.llm
                 if not hasattr(llm, "decide"):
                     llm = ExistingProviderLLM(llm, timeout=float(self.config.get("llm_timeout", 60)))
+                # The full state is already present once in the system
+                # prompt.  Sending it again as JSON user content doubled
+                # input tokens and made prefix-cache reuse less effective.
                 context = {
                     "event": event.to_dict(),
                     "trace_id": trace_id,
-                    "self": self.self_model.to_dict(),
-                    "emotion": self.self_model.emotion.to_dict(),
-                    "goals": self.goals,
-                    "memories": [m.text for m in memories],
-                    "tools": self.config.get("available_tools", []),
+                    "session_id": event.session_id,
                 }
                 decision = await llm.decide(prompt, context, trace_id)
                 actions = self._actions_from_decision(decision, event)

@@ -155,7 +155,20 @@ class IntentProvider(IntentProviderBase):
         logger.bind(tag=TAG).debug(f"使用意图识别模型: {model_info}")
 
         # 计算缓存键
-        cache_key = hashlib.md5((conn.device_id + text).encode()).hexdigest()
+        normalized_text = " ".join(str(text or "").split()).casefold()
+        history_material = [
+            {"role": str(getattr(message, "role", "")), "content": str(getattr(message, "content", "") or "")}
+            for message in dialogue_history[-self.history_count:]
+        ]
+        cache_material = {
+            "provider": self.__class__.__name__,
+            "model": model_info,
+            "text": normalized_text,
+            "history": history_material,
+        }
+        cache_key = hashlib.sha256(
+            json.dumps(cache_material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
 
         # 检查缓存
         cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
