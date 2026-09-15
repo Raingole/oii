@@ -98,6 +98,9 @@ class SimpleHttpServer:
                 # 添加路由
                 app.add_routes(
                     [
+                        web.get("/cognitive/health", self.handle_cognitive_health),
+                        web.get("/cognitive/state", self.handle_cognitive_state),
+                        web.get("/cognitive/debug", self.handle_cognitive_state),
                         web.get("/", self.handle_ui_index),
                         web.get("/styles.css", self.handle_ui_styles),
                         web.get("/app.js", self.handle_ui_app),
@@ -140,6 +143,39 @@ class SimpleHttpServer:
         """Serve the oii voice guide through the existing public HTTP port."""
         index_path = Path(__file__).resolve().parents[1] / "ui" / "index.html"
         return web.FileResponse(index_path)
+
+    def _cognitive_authorized(self, request) -> bool:
+        runtime = getattr(self.websocket_server, "cognitive_runtime", None)
+        if runtime is None:
+            return False
+        config = runtime.core.config
+        token = str(config.get("api_token", "") or "")
+        if not token:
+            return True
+        return request.headers.get("Authorization", "") == f"Bearer {token}"
+
+    async def handle_cognitive_health(self, request):
+        runtime = getattr(self.websocket_server, "cognitive_runtime", None)
+        if runtime is None:
+            return web.json_response({"ok": False, "error": "cognitive runtime disabled"}, status=503)
+        if not self._cognitive_authorized(request):
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        health = runtime.health()
+        return web.json_response({"ok": all(health.values()), "service": "cognitive-runtime", "dependencies": health}, status=200 if all(health.values()) else 503)
+
+    async def handle_cognitive_state(self, request):
+        runtime = getattr(self.websocket_server, "cognitive_runtime", None)
+        if runtime is None:
+            return web.json_response({"ok": False, "error": "cognitive runtime disabled"}, status=503)
+        if not self._cognitive_authorized(request):
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        snapshot = runtime.core.snapshot()
+        snapshot["lifecycle_trace"] = list(runtime.lifecycle_trace)
+        snapshot["scheduler"] = {
+            "running": bool(getattr(runtime.scheduler, "_task", None) and not runtime.scheduler._task.done()),
+            "autonomous_action_enabled": runtime.autonomous_action_enabled,
+        }
+        return web.json_response(snapshot)
 
     async def handle_ui_styles(self, request):
         return web.FileResponse(Path(__file__).resolve().parents[1] / "ui" / "styles.css")
