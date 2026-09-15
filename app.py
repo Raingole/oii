@@ -82,7 +82,7 @@ async def main():
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
     logger.bind(tag=TAG).info(
-        "Cognitive Core status: enabled=%s event_router=%s action_dispatcher=%s",
+        "Cognitive Core status: enabled={} event_router={} action_dispatcher={}",
         bool(ws_server.cognitive_runtime),
         bool(ws_server.event_router),
         bool(ws_server.action_dispatcher),

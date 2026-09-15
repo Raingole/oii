@@ -29,6 +29,8 @@ class QQGateway:
             "ONEBOT_WS_TOKEN": "onebot_ws_token",
             "NAPCAT_HTTP_TOKEN": "napcat_http_token",
             "NAPCAT_HTTP_URL": "napcat_http_url",
+            "NAPCAT_DELIVERY_MODE": "napcat_delivery_mode",
+            "NAPCAT_HTTP_FALLBACK": "napcat_http_fallback",
         }.items():
             if os.environ.get(env_name):
                 self.qq_config[config_name] = os.environ[env_name]
@@ -45,6 +47,15 @@ class QQGateway:
         self.self_id: Optional[str] = None
         self.recent_message_ids: set[str] = set()
         self.pending_actions: dict[str, asyncio.Future] = {}
+
+    @property
+    def delivery_mode(self) -> str:
+        return str(self.qq_config.get("napcat_delivery_mode", "websocket")).strip().lower()
+
+    @property
+    def http_fallback_enabled(self) -> bool:
+        value = self.qq_config.get("napcat_http_fallback", False)
+        return value is True or str(value).lower() in {"1", "true", "yes", "on"}
 
     @property
     def enabled(self) -> bool:
@@ -85,37 +96,41 @@ class QQGateway:
             self.server = None
 
     async def send_private_message(self, user_id: str, message: str) -> bool:
-        """Send through HTTP first, then the connected reverse WS as fallback."""
-        try:
-            if await self.service.send_private_message(str(user_id), message):
-                return True
-        except Exception as exc:
-            self.logger.bind(tag=TAG).warning(f"NapCat HTTP send unavailable; trying reverse WebSocket: {exc}")
+        """Send over the connected bidirectional OneBot socket by default.
 
-        if self.websocket is None or self.websocket.closed:
-            self.logger.bind(tag=TAG).error(
-                "NapCat message delivery unavailable: HTTP failed and reverse WebSocket is not connected"
-            )
-            return False
-        try:
-            response = await self.send_action(
-                "send_private_msg",
-                {"user_id": str(user_id), "message": str(message)},
-            )
-            retcode = response.get("retcode", 0) if isinstance(response, dict) else None
-            success = (
-                isinstance(response, dict)
-                and response.get("status", "ok") == "ok"
-                and retcode in (0, 200, "0", "200")
-            )
-            if success:
-                self.logger.bind(tag=TAG).info("NapCat message delivered through reverse WebSocket")
-            else:
+        HTTP is intentionally opt-in because the controller and NapCat are
+        commonly separate containers, while the reverse socket is the shared
+        authenticated two-way transport.
+        """
+        params = {"user_id": str(user_id), "message": str(message)}
+        websocket_available = self.websocket is not None and not self.websocket.closed
+
+        if self.delivery_mode != "http" and websocket_available:
+            try:
+                response = await self.send_action("send_private_msg", params)
+                retcode = response.get("retcode", 0) if isinstance(response, dict) else None
+                success = (
+                    isinstance(response, dict)
+                    and response.get("status", "ok") == "ok"
+                    and retcode in (0, 200, "0", "200")
+                )
+                if success:
+                    self.logger.bind(tag=TAG).info("NapCat message delivered through reverse WebSocket")
+                    return True
                 self.logger.bind(tag=TAG).error("NapCat reverse WebSocket rejected message")
-            return success
-        except Exception as exc:
-            self.logger.bind(tag=TAG).error(f"NapCat reverse WebSocket send failed: {exc}")
-            return False
+            except Exception as exc:
+                self.logger.bind(tag=TAG).error(f"NapCat reverse WebSocket send failed: {exc}")
+        elif self.delivery_mode != "http":
+            self.logger.bind(tag=TAG).error("NapCat reverse WebSocket is not connected")
+
+        if self.delivery_mode == "http" or self.http_fallback_enabled:
+            try:
+                if await self.service.send_private_message(str(user_id), message):
+                    return True
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(f"NapCat HTTP send unavailable: {exc}")
+            self.logger.bind(tag=TAG).error("NapCat HTTP message delivery failed")
+        return False
 
     async def handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         if not self._authorized(request):
