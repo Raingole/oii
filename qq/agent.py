@@ -13,7 +13,7 @@ from core.utils.dialogue import Dialogue, Message
 from jinja2 import Template
 from cognitive_core.client import CognitiveClient
 from urllib.error import URLError, HTTPError
-from .delivery import cognitive_delivery_confirmed
+from .delivery import cognitive_delivery_attempted, cognitive_delivery_confirmed
 
 TAG = __name__
 
@@ -31,6 +31,9 @@ class ReplyResult:
     action_results: list[dict[str, Any]] = field(default_factory=list)
     event_id: str = ""
     trace_id: str = ""
+    # True means the Controller already attempted the external delivery.  A
+    # failed delivery must not be sent a second time by the gateway fallback.
+    delivery_attempted: bool = False
 
 
 class QQAgentContext:
@@ -190,12 +193,13 @@ class QQAgent:
                     # succeeded ActionResult means that a reply was really
                     # delivered by a Controller executor.
                     handled = bool(result.get("duplicate")) or cognitive_delivery_confirmed(dispatched)
+                    delivery_attempted = cognitive_delivery_attempted(result.get("actions", []), dispatched)
                     reply_text = messages[0] if messages else ""
                     if handled and not result.get("duplicate"):
                         session.dialogue.put(Message(role="user", content=text))
                         if reply_text:
                             session.dialogue.put(Message(role="assistant", content=reply_text))
-                    return ReplyResult(reply_text, handled, dispatched, event.event_id)
+                    return ReplyResult(reply_text, handled, dispatched, event.event_id, "", delivery_attempted)
                 except Exception as exc:
                     self.logger.bind(tag=TAG).error(f"Cognitive router failed; legacy fallback is disabled: {exc}")
                     # Do not fall back to AgentPipeline.  The cognitive path

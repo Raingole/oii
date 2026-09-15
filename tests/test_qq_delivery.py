@@ -1,6 +1,6 @@
 import unittest
 
-from qq.delivery import cognitive_delivery_confirmed
+from qq.delivery import cognitive_delivery_attempted, cognitive_delivery_confirmed
 from qq.service import napcat_action_succeeded
 
 
@@ -16,6 +16,17 @@ class QQDeliveryCompatibilityTests(unittest.TestCase):
         self.assertFalse(cognitive_delivery_confirmed([{"status": "failed", "success": False}]))
         self.assertFalse(cognitive_delivery_confirmed([{"status": "pending", "success": False}]))
         self.assertTrue(cognitive_delivery_confirmed([{"status": "succeeded", "success": True}]))
+
+    def test_failed_cognitive_delivery_is_not_sent_again_by_gateway(self):
+        """The gateway fallback must not duplicate an already attempted send."""
+        self.assertTrue(cognitive_delivery_attempted(
+            [{"type": "send_message"}],
+            [{"status": "failed", "success": False}],
+        ))
+        self.assertFalse(cognitive_delivery_attempted(
+            [{"type": "do_nothing"}],
+            [],
+        ))
 
 
 if __name__ == "__main__":

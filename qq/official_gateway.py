@@ -196,7 +196,7 @@ class QQOfficialGateway:
             {"platform": "official", "actor_id": f"qq:{user_id}"},
         ) if hasattr(self.agent, "reply_result") else None
         answer = reply.text if reply else await self.agent.reply(session_key, text, message_id, {"platform": "official"})
-        if not (reply and reply.handled_by_cognitive):
+        if not (reply and (reply.handled_by_cognitive or reply.delivery_attempted)):
             await self._send_c2c_message(user_id, answer, message_id)
 
     async def _send_c2c_message(self, user_openid: str, text: str, message_id: str) -> None:
