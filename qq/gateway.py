@@ -93,6 +93,9 @@ class QQGateway:
             self.logger.bind(tag=TAG).warning(f"NapCat HTTP send unavailable; trying reverse WebSocket: {exc}")
 
         if self.websocket is None or self.websocket.closed:
+            self.logger.bind(tag=TAG).error(
+                "NapCat message delivery unavailable: HTTP failed and reverse WebSocket is not connected"
+            )
             return False
         try:
             response = await self.send_action(
@@ -100,11 +103,16 @@ class QQGateway:
                 {"user_id": str(user_id), "message": str(message)},
             )
             retcode = response.get("retcode", 0) if isinstance(response, dict) else None
-            return (
+            success = (
                 isinstance(response, dict)
                 and response.get("status", "ok") == "ok"
                 and retcode in (0, 200, "0", "200")
             )
+            if success:
+                self.logger.bind(tag=TAG).info("NapCat message delivered through reverse WebSocket")
+            else:
+                self.logger.bind(tag=TAG).error("NapCat reverse WebSocket rejected message")
+            return success
         except Exception as exc:
             self.logger.bind(tag=TAG).error(f"NapCat reverse WebSocket send failed: {exc}")
             return False

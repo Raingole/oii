@@ -81,6 +81,12 @@ async def main():
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
+    logger.bind(tag=TAG).info(
+        "Cognitive Core status: enabled=%s event_router=%s action_dispatcher=%s",
+        bool(ws_server.cognitive_runtime),
+        bool(ws_server.event_router),
+        bool(ws_server.action_dispatcher),
+    )
     ws_task = None
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config, ws_server)
