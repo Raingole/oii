@@ -30,6 +30,33 @@ def read_config(config_path):
     return config
 
 
+def _apply_llm_environment(config):
+    """Apply provider credentials from environment without logging secrets."""
+    selected = config.get("selected_module", {}) if isinstance(config.get("selected_module", {}), dict) else {}
+    provider_name = str(selected.get("LLM", "")).strip()
+    if not provider_name:
+        return
+    providers = config.setdefault("LLM", {})
+    provider = providers.setdefault(provider_name, {})
+    env_prefixes = {
+        "DeepSeekLLM": "DEEPSEEK",
+        "AliLLM": "QWEN",
+        "DoubaoLLM": "DOUBAO",
+        "ChatGLMLLM": "ZHIPU",
+    }
+    prefix = env_prefixes.get(provider_name, "LLM")
+    api_key = os.environ.get(f"{prefix}_API_KEY") or os.environ.get("LLM_API_KEY")
+    if api_key:
+        provider["api_key"] = api_key
+    base_url = os.environ.get(f"{prefix}_BASE_URL")
+    if base_url:
+        provider["base_url"] = base_url
+        provider["url"] = base_url
+    model = os.environ.get(f"{prefix}_MODEL")
+    if model:
+        provider["model_name"] = model
+
+
 async def load_config():
     """加载配置文件"""
     from core.utils.cache.manager import cache_manager, CacheType
@@ -51,6 +78,7 @@ async def load_config():
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
+    _apply_llm_environment(config)
     # MailPilot runs as a separate process. Environment variables override
     # only the local webhook integration settings.
     mailpilot = config.setdefault("mailpilot", {})

@@ -37,6 +37,15 @@ cd "${ROOT_DIR}"
 command -v "${PYTHON_BIN}" >/dev/null 2>&1 || fail "Python not found: ${PYTHON_BIN}"
 [[ -f data/.config.yaml ]] || fail "Missing data/.config.yaml"
 [[ -d "${MEMORY_DIR}" ]] || fail "Missing embedded MemoryCore source"
+
+# Load local deployment secrets without committing them to YAML or Git.
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.env"
+    set +a
+fi
+
 mkdir -p "${LOG_DIR}" data/memory
 
 if [[ "${INSTALL_PYTHON_DEPS:-0}" == "1" ]]; then

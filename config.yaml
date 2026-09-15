@@ -775,7 +775,7 @@ LLM:
     # 可在这里找到你的api key https://platform.deepseek.com/
     model_name: deepseek-v4-flash
     url: https://api.deepseek.com
-    api_key: sk-1bbf7fadec6d4f7288741152065996f7
+    api_key: ""
   ChatGLMLLM:
     # 定义LLM API类型
     type: openai
