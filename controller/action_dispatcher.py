@@ -19,7 +19,11 @@ class ActionDispatcher:
         task=asyncio.current_task()
         if task:self._inflight.add(task)
         try:
-            record=self.outbox.put(event_id,action,self.max_attempts); aid=record["action_id"]
+            # QQ message delivery is deliberately at-most-once.  A OneBot
+            # timeout is ambiguous: the message may already have reached QQ,
+            # so retrying send_private_msg can create duplicate messages.
+            action_attempts = 1 if action.get("type") == "send_message" and action.get("channel") == "qq" else self.max_attempts
+            record=self.outbox.put(event_id,action,action_attempts); aid=record["action_id"]
             async with self._locks.setdefault(aid,asyncio.Lock()):
                 record=self.outbox.get(aid) or record
                 if record["status"]=="succeeded":return ActionResult(aid,"succeeded",True,attempts=record["attempts"])

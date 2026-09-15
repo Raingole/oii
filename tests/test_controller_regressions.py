@@ -107,6 +107,17 @@ class ControllerRegressionTests(unittest.IsolatedAsyncioTestCase):
         await d.dispatch("retry-event",action); await d.handle_device_action_result(action["action_id"],"timeout",result={}); await d.process_due_retries()
         self.assertEqual(calls,["retry-scheduler","retry-scheduler"]); self.assertEqual(ob.get(action["action_id"])["status"],"succeeded")
 
+    async def test_qq_send_timeout_is_at_most_once(self):
+        ob=ActionOutbox(self.path); d=ActionDispatcher(ob,max_attempts=3,timeout=.01); calls=[]
+        async def unavailable(_):
+            calls.append(1)
+            raise TimeoutError("OneBot echo timeout")
+        d.register("send_message", unavailable)
+        result=await d.dispatch("qq-event", {"action_id":"qq-once","type":"send_message","channel":"qq","payload":{"text":"hello"}})
+        self.assertEqual(result.status,"failed")
+        self.assertEqual(calls,[1])
+        self.assertEqual(ob.get("qq-once")["attempts"],1)
+
     async def test_scheduler_runs_persisted_work_when_autonomy_disabled(self):
         ob=ActionOutbox(self.path); d=ActionDispatcher(ob,timeout=.02); calls=[]
         async def execute(action): calls.append(action["action_id"]); return {"status":"completed"}
