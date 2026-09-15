@@ -94,8 +94,12 @@ async def main():
             target = str(action.get("target") or action.get("payload", {}).get("target") or "")
             user_id = target.split(":", 1)[-1] if target.startswith("qq:") else target
             if action.get("payload", {}).get("platform") == "official":
-                return await qq_official_gateway._send_c2c_message(user_id, str(action.get("payload", {}).get("text", "")), str(action.get("payload", {}).get("source_message_id", "")))
-            return await qq_gateway.service.send_private_message(user_id, str(action.get("payload", {}).get("text", "")))
+                await qq_official_gateway._send_c2c_message(user_id, str(action.get("payload", {}).get("text", "")), str(action.get("payload", {}).get("source_message_id", "")))
+                return {"status": "completed", "output_sent": True, "channel": "qq_official"}
+            sent = await qq_gateway.send_private_message(user_id, str(action.get("payload", {}).get("text", "")))
+            if not sent:
+                raise RuntimeError("NapCat message delivery failed")
+            return {"status": "completed", "output_sent": True, "channel": "napcat"}
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     if ws_server.action_dispatcher is not None:
         class _DynamicProvider:

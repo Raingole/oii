@@ -84,6 +84,31 @@ class QQGateway:
             await self.server.cleanup()
             self.server = None
 
+    async def send_private_message(self, user_id: str, message: str) -> bool:
+        """Send through HTTP first, then the connected reverse WS as fallback."""
+        try:
+            if await self.service.send_private_message(str(user_id), message):
+                return True
+        except Exception as exc:
+            self.logger.bind(tag=TAG).warning(f"NapCat HTTP send unavailable; trying reverse WebSocket: {exc}")
+
+        if self.websocket is None or self.websocket.closed:
+            return False
+        try:
+            response = await self.send_action(
+                "send_private_msg",
+                {"user_id": str(user_id), "message": str(message)},
+            )
+            retcode = response.get("retcode", 0) if isinstance(response, dict) else None
+            return (
+                isinstance(response, dict)
+                and response.get("status", "ok") == "ok"
+                and retcode in (0, 200, "0", "200")
+            )
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"NapCat reverse WebSocket send failed: {exc}")
+            return False
+
     async def handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         if not self._authorized(request):
             self.logger.bind(tag=TAG).warning("Rejected OneBot connection: invalid token")
@@ -196,4 +221,4 @@ class QQGateway:
         answer = reply.text if reply else await self.agent.reply(message.session_key, message.message, message.message_id or "")
         self.logger.bind(tag=TAG).info(f"QQ pipeline completed: session={message.session_key}, reply_length={len(answer or '')}")
         if not (reply and reply.handled_by_cognitive):
-            await self.service.send_private_message(message.user_id, answer)
+            await self.send_private_message(message.user_id, answer)
