@@ -15,6 +15,7 @@ from config.logger import setup_logging
 from core.utils.util import get_local_ip, validate_mcp_endpoint
 from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
+from core.servo_control import ServoControlServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
 from qq.gateway import QQGateway
@@ -81,6 +82,7 @@ async def main():
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
+    servo_server = ServoControlServer(config, logger)
     logger.bind(tag=TAG).info(
         "Cognitive Core status: enabled={} event_router={} action_dispatcher={}",
         bool(ws_server.cognitive_runtime),
@@ -130,6 +132,7 @@ async def main():
         catalog.register("device_mcp", _DynamicProvider(lambda: next((getattr(c, "mcp_client", None) for c in ws_server.connections.values() if getattr(c, "mcp_client", None) is not None), None)))
         catalog.register("plugins", _DynamicProvider(lambda: getattr(getattr(_context(), "func_handler", None), "tool_manager", None), _context))
         catalog.register("desktop", _DynamicProvider(lambda: getattr(ws_server, "desktop_control", None)))
+        catalog.register("servo", servo_server)
         tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))
         async def _esp_executor(action):
             target = str(action.get("target") or action.get("payload", {}).get("device_id") or "")
@@ -155,6 +158,7 @@ async def main():
         await ws_server.cognitive_runtime.recover()
         await ws_server.cognitive_runtime.start_heartbeat()
     ws_task = asyncio.create_task(ws_server.start())
+    servo_task = asyncio.create_task(servo_server.start())
     ota_task = asyncio.create_task(ota_server.start())
     qq_task = asyncio.create_task(qq_gateway.start())
     qq_official_task = asyncio.create_task(qq_official_gateway.start())
@@ -228,12 +232,13 @@ async def main():
             ota_task.cancel()
         qq_task.cancel()
         qq_official_task.cancel()
+        servo_task.cancel()
         await qq_gateway.close()
         await qq_official_gateway.close()
 
         # 等待任务终止（必须加超时）
         await asyncio.wait(
-            [stdin_task, ws_task, ota_task, qq_task, qq_official_task] if ota_task else [stdin_task, ws_task, qq_task, qq_official_task],
+            [stdin_task, ws_task, servo_task, ota_task, qq_task, qq_official_task] if ota_task else [stdin_task, ws_task, servo_task, qq_task, qq_official_task],
             timeout=3.0,
             return_when=asyncio.ALL_COMPLETED,
         )

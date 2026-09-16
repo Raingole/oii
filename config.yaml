@@ -10,6 +10,10 @@ server:
   # 服务器监听地址和端口(Server listening address and port)
   ip: 0.0.0.0
   port: 8000
+  # MG946R 独立 WebSocket 控制服务
+  servo_port: 8777
+  servo_device_id: mg946r-001
+  servo_token: mg946r-token
   # http服务的端口，用于简单OTA接口(单服务部署)，以及视觉分析接口
   http_port: 8003
   # 桌面插件控制令牌。建议设置随机长字符串；不设置时使用 auth_key。
