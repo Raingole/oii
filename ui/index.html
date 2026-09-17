@@ -29,10 +29,8 @@
         <div class="device-card-head"><div><span class="eyebrow">DEVICE CONTROL</span><h2>MG946R 舵机</h2><p id="deviceEndpoint">ws://36.212.7.43:8777/ws</p></div><span class="device-state offline" id="deviceState">离线</span></div>
         <div class="device-meta"><span>设备 ID</span><strong>mg946r-001</strong></div>
         <div class="device-angle"><div><span>当前角度</span><strong id="deviceAngle">—°</strong></div><span id="deviceConnectionText">未连接</span></div>
-        <input id="angleRange" type="range" min="0" max="180" value="90" aria-label="舵机角度" />
-        <div class="angle-row"><input id="angleInput" type="number" min="0" max="180" value="90" aria-label="角度" /><button id="angleButton" class="device-primary" type="button">发送角度</button></div>
-        <div class="device-actions"><button type="button" data-device-command="left">左转</button><button type="button" data-device-command="center">回中</button><button type="button" data-device-command="right">右转</button><button type="button" data-device-command="sweep">扫描</button></div>
-        <button id="deviceConnectButton" class="device-connect" type="button">连接设备</button><small class="device-note">支持本地网页和中控 WebSocket 控制，角度范围 0–180°。</small>
+        <div class="device-actions servo-door-actions"><button type="button" data-device-angle="0">0° 关门</button><button type="button" data-device-angle="180">180° 开门</button></div>
+        <button id="deviceConnectButton" class="device-connect" type="button">连接设备</button><small class="device-note">仅支持 0° 关门和 180° 开门。</small>
       </aside>
       <section class="chat-panel">
         <div class="chat-top"><div><h1>中控助手</h1><p><span class="online-dot"></span> 已连接 · 可以开始发送指令</p></div><span class="shield">⌾ 安全通道</span></div>
