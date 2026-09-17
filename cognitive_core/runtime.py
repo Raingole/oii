@@ -47,6 +47,22 @@ class CognitiveCore:
             "team_id": event.metadata.get("team_id", self.config.get("team_id", "personal")),
         }
         memories = await self.memory.search(str(event.content.get("text", event.type)), top_k=int(self.config.get("memory_top_k", 8)), context_budget=int(self.config.get("memory_context_budget", 4000)), **identity)
+        # Conversation context is short-lived working state, not long-term
+        # memory.  Rebuild it from SQLite so restart/send-failure does not
+        # erase the meaning of the previous turn.
+        stored_history = self.store.recent_conversation(
+            event.session_id,
+            int(self.config.get("conversation_window", 12)),
+        )
+        supplied_history = event.metadata.get("conversation_history", [])
+        history: list[dict[str, str]] = []
+        for item in [*stored_history, *(supplied_history if isinstance(supplied_history, list) else [])]:
+            if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"} or not item.get("content"):
+                continue
+            normalized = {"role": str(item["role"]), "content": str(item["content"])}
+            if normalized not in history:
+                history.append(normalized)
+        history = history[-int(self.config.get("conversation_window", 12)) * 2:]
         app = appraisal(event, self.goals); delta = emotion_delta(event, app)
         for key, value in delta.items(): setattr(self.self_model.emotion, key, getattr(self.self_model.emotion, key) + value)
         self.self_model.emotion.clamp()
@@ -63,7 +79,7 @@ class CognitiveCore:
                     event.to_dict(),
                     self.config.get("available_tools", []),
                     str(self.config.get("persona_prompt", "")),
-                    event.metadata.get("conversation_history", []),
+                    history,
                 )
                 llm = self.llm
                 if not hasattr(llm, "decide"):
@@ -107,6 +123,23 @@ class CognitiveCore:
             self.self_model.body = self.bodies
         self.self_model.active_goals = self.goals; self.store.save_self(self.agent_id, self.self_model)
         for action in actions: self.store.put("actions", action.action_id, action.to_dict())
+        if event.source in {"qq", "esp32", "sms", "email"} and event.type in {"message", "speech", "notification"}:
+            assistant_text = next(
+                (
+                    str(action.payload.get("text", ""))
+                    for action in actions
+                    if action.type in {"send_message", "speak"} and action.payload.get("text")
+                ),
+                "",
+            )
+            self.store.save_conversation_turn(
+                event.event_id,
+                event.session_id,
+                str(identity["user_id"]),
+                str(identity["channel"]),
+                str(event.content.get("text", "")),
+                assistant_text,
+            )
         self.last_tick = {"event": event.to_dict(), "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories]}
         return {"event_id": event.event_id, "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories], "actions": [a.to_dict() for a in actions]}
 

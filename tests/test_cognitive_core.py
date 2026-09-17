@@ -257,6 +257,27 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("上一句", captured["prompt"])
         self.assertIn("上一答", captured["prompt"])
 
+    async def test_conversation_context_survives_core_restart(self):
+        path = str(Path(self.tmp.name) / "conversation.db")
+        first = CognitiveCore(path, config={"llm_enabled": False, "conversation_window": 4})
+        await first.process_event(CognitiveEvent.create(
+            "qq", "message", "qq:7", "agent", {"text": "我刚才说了天气"},
+            session_id="qq:7", event_id="qq:first",
+        ))
+        second = CognitiveCore(path, config={"llm_enabled": True, "conversation_window": 4})
+        captured = {}
+        class ContextLLM:
+            async def decide(self, prompt, context, trace_id=""):
+                captured["prompt"] = prompt
+                return {"intent": "reply", "message": "记得你刚才提到天气", "risk_level": "low"}
+        second.llm = ContextLLM()
+        await second.process_event(CognitiveEvent.create(
+            "qq", "message", "qq:7", "agent", {"text": "那接下来呢"},
+            session_id="qq:7", event_id="qq:second",
+        ))
+        self.assertIn("我刚才说了天气", captured["prompt"])
+        self.assertIn("那接下来呢", captured["prompt"])
+
     async def test_tool_call_gets_followup_reply(self):
         calls = []
 

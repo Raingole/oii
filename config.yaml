@@ -94,6 +94,7 @@ cognitive_core:
   heartbeat_interval: 60
   autonomous_action_enabled: false
   llm_enabled: true
+  conversation_window: 12
   # 在这里填写 Cognitive Core 的人格提示词；留空则只使用结构化 Self Model。
   persona_prompt: ""
 

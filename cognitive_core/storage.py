@@ -23,6 +23,17 @@ class StateStore:
             CREATE TABLE IF NOT EXISTS reflections (reflection_id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS timeline_events (timeline_id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS event_inbox (event_id TEXT PRIMARY KEY, status TEXT NOT NULL, received_at TEXT DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS conversation_turns (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                user_text TEXT NOT NULL,
+                assistant_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_turns_session
+                ON conversation_turns(session_id, created_at);
             """)
             if db.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0: db.execute("INSERT INTO schema_version(version) VALUES(1)")
             db.commit()
@@ -64,3 +75,47 @@ class StateStore:
         db = sqlite3.connect(self.path)
         try: return db.execute("SELECT 1 FROM events WHERE event_id=?", (event_id,)).fetchone() is not None
         finally: db.close()
+
+    def save_conversation_turn(
+        self,
+        event_id: str,
+        session_id: str,
+        user_id: str,
+        channel: str,
+        user_text: str,
+        assistant_text: str = "",
+    ) -> None:
+        if not session_id or not user_text:
+            return
+        db = sqlite3.connect(self.path)
+        try:
+            db.execute(
+                """INSERT INTO conversation_turns
+                   (event_id,session_id,user_id,channel,user_text,assistant_text)
+                   VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                   assistant_text=excluded.assistant_text""",
+                (event_id, session_id, user_id, channel, user_text, assistant_text or ""),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def recent_conversation(self, session_id: str, limit: int = 12) -> list[dict[str, str]]:
+        if not session_id:
+            return []
+        db = sqlite3.connect(self.path)
+        try:
+            rows = db.execute(
+                """SELECT user_text,assistant_text FROM conversation_turns
+                   WHERE session_id=? ORDER BY created_at DESC LIMIT ?""",
+                (session_id, max(1, int(limit))),
+            ).fetchall()
+        finally:
+            db.close()
+        history: list[dict[str, str]] = []
+        for user_text, assistant_text in reversed(rows):
+            history.append({"role": "user", "content": user_text})
+            if assistant_text:
+                history.append({"role": "assistant", "content": assistant_text})
+        return history
