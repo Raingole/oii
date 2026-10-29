@@ -285,8 +285,25 @@ class LearningService:
         return result
 
     async def learn_interest(self, interest):
-        result = await self.client.call('search_bilibili_videos',{'query':interest['topic'],'limit':5})
-        candidates = result.get('videos', result.get('results', []))
+        topic=str(interest['topic']).strip()
+        normalized=re.sub(r'^(?:B站|哔哩哔哩)\s*','',topic).strip()
+        broad=re.sub(r'(?:相关)?(?:网络)?梗$','',normalized).strip()
+        queries=list(dict.fromkeys(query for query in (topic,normalized,broad) if len(query)>=2))
+        candidates=[]
+        seen=set()
+        for query in queries:
+            result=await self.client.call('search_bilibili_videos',{'query':query,'limit':5})
+            videos=result.get('videos',result.get('results',[]))
+            for video in videos if isinstance(videos,list) else []:
+                try:
+                    ident=video_id(video.get('bvid',''))
+                except (ValueError,AttributeError):
+                    continue
+                if ident not in seen:
+                    seen.add(ident)
+                    candidates.append(video)
+            if candidates:
+                break
         for video in candidates[:5]:
             try:
                 ident = video_id(video.get('bvid',''))
