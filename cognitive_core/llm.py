@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from typing import Any, Protocol
 
 from .structured import parse_structured
@@ -82,6 +83,11 @@ def parse_decision(raw: str) -> dict[str, Any]:
     decision. A malformed action response is never inferred or executed.
     """
     text = str(raw).strip()
+    compact = re.sub(r"\s+", "", text).replace("｜", "|").lower()
+    if any(marker in compact for marker in ("<|dsml|calls", "<|dsml|invoke", "<|dsml|parameter", "<tool_call", "<function_call")):
+        # DeepSeek-native tool markup is not the cognitive JSON protocol. It
+        # must never be surfaced as chat text or interpreted as an action.
+        raise LLMDecisionError("unparsed_tool_markup")
     parsed = parse_structured(text, None, None)
     if not isinstance(parsed, dict) or not parsed:
         # A provider can occasionally answer in plain text despite the JSON

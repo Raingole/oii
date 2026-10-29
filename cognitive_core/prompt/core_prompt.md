@@ -122,6 +122,7 @@ Markdown 标题、列表、加粗、引用块
 ## Output protocol
 
 必须输出结构化 JSON，不得输出 Markdown、解释文字或额外字段：
+不得输出 DeepSeek 原生 DSML、`<|DSML|calls>`、`<|DSML|invoke>` 等工具标记；工具意图也只能按下方 JSON 协议表达。工具标记不是聊天内容，也不会被系统执行。
 
 ```json
 {
