@@ -135,7 +135,8 @@ class KnowledgeStore:
         with self.connect() as db:
             rows = db.execute('''SELECT c.*,s.url,s.title,s.data_source,s.summary FROM chunk_search
                 JOIN chunks c ON c.id=chunk_search.rowid JOIN sources s ON s.id=c.source_id
-                WHERE chunk_search MATCH ? AND s.scope=? AND (? IS NULL OR s.data_source=?) ORDER BY bm25(chunk_search) LIMIT ?''',
+                WHERE chunk_search MATCH ? AND s.scope=? AND (? IS NULL OR s.data_source=?)
+                ORDER BY bm25(chunk_search) * CASE WHEN s.data_source='bilibili_comment_image' THEN 1.05 ELSE 1 END LIMIT ?''',
                 (expression, scope, data_source, data_source, min(10, max(1, limit)))).fetchall()
         result, used, noted = [], 0, set()
         for row in rows:
@@ -187,7 +188,7 @@ class KnowledgeStore:
                 'sources':db.execute('SELECT COUNT(*) FROM sources WHERE scope=?',(scope,)).fetchone()[0],
                 'meme_entries':db.execute('''SELECT COUNT(*) FROM chunks c JOIN sources s ON s.id=c.source_id
                     WHERE s.scope=? AND s.data_source='bilibili_meme_transcript' ''',(scope,)).fetchone()[0],
-                'video_notes':db.execute('''SELECT COUNT(*) FROM sources WHERE scope=? AND data_source!='bilibili_meme_transcript' ''',(scope,)).fetchone()[0],
+                'video_notes':db.execute('''SELECT COUNT(*) FROM sources WHERE scope=? AND data_source NOT IN ('bilibili_meme_transcript','bilibili_comment_image')''',(scope,)).fetchone()[0],
                 'images':db.execute('SELECT COUNT(*) FROM meme_assets WHERE scope=?',(scope,)).fetchone()[0],
             }
         return {'scope':scope,'counts':counts,'sources':items,
@@ -212,6 +213,17 @@ class KnowledgeStore:
             db.execute('INSERT OR REPLACE INTO meme_assets(scope,hash,image,payload,created,used) VALUES (?,?,?,?,?,COALESCE((SELECT used FROM meme_assets WHERE scope=? AND hash=?),0))',
                 (scope,digest,image,json.dumps(payload,ensure_ascii=False),time.time(),scope,digest))
             db.execute('DELETE FROM meme_assets WHERE rowid IN (SELECT rowid FROM meme_assets WHERE scope=? ORDER BY created DESC LIMIT -1 OFFSET ?)',(scope,max(1,int(limit))))
+
+    def annotate_meme_asset(self, scope, digest, metadata):
+        with self.connect() as db:
+            row=db.execute('SELECT payload FROM meme_assets WHERE scope=? AND hash=?',(scope,digest)).fetchone()
+            if not row:
+                return False
+            payload=json.loads(row['payload'])
+            payload.update(metadata)
+            db.execute('UPDATE meme_assets SET payload=? WHERE scope=? AND hash=?',
+                (json.dumps(payload,ensure_ascii=False),scope,digest))
+            return True
 
     def find_meme_asset(self, scope, query):
         terms=set(search_terms(query))

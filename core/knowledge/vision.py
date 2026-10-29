@@ -227,7 +227,7 @@ class VisualUnderstanding:
                         asset_payload={key:result.get(key) for key in ('kind','description','visible_text','intent','context','usage_scenarios','tags','expressed_emotions')}
                         self.store.save_meme_asset(scope,digest,jpeg,asset_payload,int(self.settings().get('asset_limit_per_scope',300)))
                         result={**result,'asset_id':asset_id}
-                    output.append(result)
+                    output.append({**result,'image_hash':digest})
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

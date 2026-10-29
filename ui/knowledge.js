@@ -48,6 +48,9 @@
     cover.append(image);top.append(el('span','badge image',item.payload?.kind==='meme'?'表情包':'图片'),el('span','date',when(item.created)));body.append(top);
     const payload=item.payload||{};body.append(el('h3','',payload.description||payload.visible_text||'已保存图片'));
     rowLabel(body,'图中文字',payload.visible_text);rowLabel(body,'意图',payload.intent);rowLabel(body,'适用语境',payload.context);
+    if(payload.source_comment)rowLabel(body,'关联评论',payload.source_comment);
+    if(payload.source_title)rowLabel(body,'来源视频',payload.source_title);
+    const source=sourceLink(payload.source_url,'查看 B 站评论区来源 ↗');if(source)body.append(source);
     for(const emotion of (payload.expressed_emotions||[]).slice(0,3))body.append(el('span','emotion',emotion.label+(emotion.evidence?' · '+emotion.evidence:'')));
     card.append(cover,body);return card;
   }
@@ -78,10 +81,11 @@
     const data=state.data;if(!data)return[];const query=state.query.trim().toLocaleLowerCase();const cards=[];
     for(const source of data.sources||[]){
       const memes=source.data_source==='bilibili_meme_transcript';
-      if(state.filter==='meme'&&!memes)continue;if(state.filter==='video'&&memes)continue;if(state.filter==='image')continue;
+      const commentImages=source.data_source==='bilibili_comment_image';
+      if(state.filter==='meme'&&!memes)continue;if(state.filter==='video'&&(memes||commentImages))continue;if(state.filter==='image')continue;
       const chunks=source.chunks||[];
       if(memes){for(const chunk of chunks){const blob=[source.title,source.summary,chunk.text].join(' ').toLocaleLowerCase();if(!query||blob.includes(query))cards.push(memeCard(source,chunk));}}
-      else {const blob=[source.title,source.summary,...chunks.map(c=>c.text)].join(' ').toLocaleLowerCase();if(!query||blob.includes(query))cards.push(videoCard(source));}
+      else if(!commentImages){const blob=[source.title,source.summary,...chunks.map(c=>c.text)].join(' ').toLocaleLowerCase();if(!query||blob.includes(query))cards.push(videoCard(source));}
     }
     if(state.filter==='all'||state.filter==='image')for(const image of data.images||[]){const blob=JSON.stringify(image.payload||{}).toLocaleLowerCase();if(!query||blob.includes(query))cards.push(imageCard(image));}
     return cards;
