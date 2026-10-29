@@ -28,6 +28,26 @@ def clean_interests(value, text):
     return result
 
 
+def topic_title_relevance(topic, title):
+    """Return a conservative lexical relevance score for a Bilibili result title."""
+    query = str(topic or '').lower()
+    query = re.sub(r'^(?:b站|哔哩哔哩)', '', query)
+    query = re.sub(r'(?:相关)?(?:网络)?梗$', '', query)
+    query = re.sub(r'^(?:搜索|查找|学习|主题|关键词)', '', query)
+    query = re.sub(r'^[的关于]+|[的相关]+$', '', query)
+    query = re.sub(r'[^\w\u3400-\u9fff]+', '', query)
+    candidate = re.sub(r'[^\w\u3400-\u9fff]+', '', str(title or '').lower())
+    if len(query) < 2 or not candidate:
+        return 0.0
+    if query in candidate:
+        return 1.0
+    if len(query) <= 3:
+        return 0.0
+    bigrams = {query[index:index + 2] for index in range(len(query) - 1)}
+    matched = sum(1 for gram in bigrams if gram in candidate)
+    return matched / len(bigrams)
+
+
 def transcript_chunks(text):
     chunks, buffer, start, end = [], [], None, None
     for line in str(text)[:60000].splitlines():
@@ -270,7 +290,7 @@ class LearningService:
             except Exception as exc:
                 # Keep only a bounded category, never a Cookie or raw response.
                 error = str(exc)
-                safe = {'transcript_required_not_description','transcript_too_short','learning_summary_unavailable','no_new_video_candidate','meme_extraction_unavailable','meme_transcript_missing','bilibili_response_not_structured','bilibili_process_exited','bilibili_protocol_error','bilibili_protocol_limit','bilibili_upstream_error','bilibili_runtime_missing','bilibili_request_timeout'}
+                safe = {'transcript_required_not_description','transcript_too_short','learning_summary_unavailable','no_new_video_candidate','no_relevant_video_candidate','meme_extraction_unavailable','meme_transcript_missing','bilibili_response_not_structured','bilibili_process_exited','bilibili_protocol_error','bilibili_protocol_limit','bilibili_upstream_error','bilibili_runtime_missing','bilibili_request_timeout'}
                 category = ('bilibili_request_timeout' if isinstance(exc, asyncio.TimeoutError) else
                     error if error in safe or re.fullmatch(r'bilibili_(?:COOKIE_EXPIRED|SUBTITLE_UNAVAILABLE|API_RATE_LIMITED|VALIDATION_ERROR|AUTH_REQUIRED|CREDENTIALS_REQUIRED)',error) else type(exc).__name__)
                 if job:
@@ -291,6 +311,7 @@ class LearningService:
         queries=list(dict.fromkeys(query for query in (topic,normalized,broad) if len(query)>=2))
         candidates=[]
         seen=set()
+        relevant_found=False
         for query in queries:
             result=await self.client.call('search_bilibili_videos',{'query':query,'limit':5})
             videos=result.get('videos',result.get('results',[]))
@@ -301,10 +322,14 @@ class LearningService:
                     continue
                 if ident not in seen:
                     seen.add(ident)
-                    candidates.append(video)
+                    score=topic_title_relevance(topic,video.get('title'))
+                    if score >= 0.55:
+                        relevant_found=True
+                        candidates.append((score,video))
             if candidates:
                 break
-        for video in candidates[:5]:
+        candidates.sort(key=lambda item:item[0],reverse=True)
+        for _,video in candidates[:5]:
             try:
                 ident = video_id(video.get('bvid',''))
             except ValueError:
@@ -321,7 +346,7 @@ class LearningService:
             except RuntimeError as exc:
                 self.store.state('skip:'+interest['scope']+':'+ident, {'until':self.clock()+86400})
                 raise exc
-        raise RuntimeError('no_new_video_candidate')
+        raise RuntimeError('no_relevant_video_candidate' if seen and not relevant_found else 'no_new_video_candidate')
 
     async def learn_random_meme(self, scope):
         queries=['B站 最近热梗 弹幕','B站 梗盘点 名场面','鬼畜 热梗 素材出处','2026 网络热梗 盘点','游戏区 弹幕热梗','动画区 名场面 梗','影视二创 热梗 解释','UP主梗百科 热梗']
