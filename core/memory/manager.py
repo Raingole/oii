@@ -15,6 +15,7 @@ import os
 import re
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from config.logger import setup_logging
 from .vault import SecretVault
 from .identity import IdentityResolver
 from .tencent_memory import TencentMemoryAdapter
+from .mmtr_memory import MmtrMemoryAdapter
 
 TAG = __name__
 
@@ -61,7 +63,7 @@ class MemoryManager:
         self.config = config or {}
         configured_backend = str(self.config.get("memory_backend", "legacy"))
         memory_enabled = str(self.config.get("tencent_memory_enabled", False)).strip().lower() in {"1", "true", "yes", "on"}
-        self.backend_name = ("tencent" if memory_enabled else str(configured_backend)).strip().lower()
+        self.backend_name = ("mmtr" if configured_backend.strip().lower() == "mmtr" else ("tencent" if memory_enabled else str(configured_backend))).strip().lower()
         selected = self.config.get("selected_module", {}).get("Memory", "")
         memory_config = self.config.get("Memory", {}).get(selected, {})
         memory_config = memory_config if isinstance(memory_config, dict) else {}
@@ -80,26 +82,40 @@ class MemoryManager:
         self.logger = setup_logging(config)
         self.identity_resolver = IdentityResolver(self.config)
         self.tencent_backend = None
+        self.mmtr_backend = None
         self._last_tencent_context = {}
+        if self.backend_name == "mmtr":
+            self.mmtr_backend = MmtrMemoryAdapter(self.config)
         if self.backend_name == "tencent":
             self.tencent_backend = TencentMemoryAdapter(self.config)
             self.tencent_backend.initialize()
         self.vault = SecretVault(self.database_path.parent / ".vault.key")
         self._initialize_database()
+        if self.mmtr_backend is not None:
+            self.mmtr_backend.initialize()
         self.logger.bind(tag=TAG).info(
             f"记忆后端已启用: backend={self.backend_name}, owner={self.owner_id}, database={self.database_path}"
         )
 
     @property
+    def using_mmtr(self) -> bool:
+        return self.mmtr_backend is not None
+
+    @property
     def using_tencent(self) -> bool:
         return self.tencent_backend is not None
 
+    @contextmanager
     def _connect(self):
         db = sqlite3.connect(str(self.database_path), timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout = 30000")
-        db.execute("PRAGMA journal_mode = WAL")
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout = 30000")
+            db.execute("PRAGMA journal_mode = WAL")
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def _initialize_database(self):
         with self._lock, self._connect() as db:
@@ -391,7 +407,11 @@ class MemoryManager:
             lines.append(f"- Secret names (values are never included): {', '.join(data['secret_names'])}")
         return "\n".join(lines)
 
-    def retrieve_prompt(self, user_id: str, channel: str, session_id: str, query: str, turn_id=None) -> str:
+    def retrieve_prompt(self, user_id: str, channel: str, session_id: str, query: str, turn_id=None, context_budget=None) -> str:
+        if self.using_mmtr:
+            return self.mmtr_backend.recall_for_turn(
+                self.owner_id, session_id, turn_id, query, context_budget=context_budget
+            )
         if self.using_tencent:
             context = self.tencent_backend.recall_for_turn(
                 user_id or self.owner_id, session_id, turn_id or "unknown", query
@@ -714,6 +734,8 @@ class MemoryManager:
         return {**dict(row), "data": _parse(row["data_json"], {})} if row else None
 
     def record_tool_result(self, tool_name: str, value: Any, channel: str, session_id: str, turn_id=None, arguments=None):
+        if self.using_mmtr:
+            return self.mmtr_backend.commit_tool_result(self.owner_id, session_id, turn_id, tool_name, arguments, value)
         if self.using_tencent:
             self.tencent_backend.submit_tool_result(
                 self.resolve_owner(channel, session_id), session_id, turn_id or "unknown", tool_name,
@@ -740,6 +762,8 @@ class MemoryManager:
             self._index(db, "episode", "memory_episodes", cursor.lastrowid, summary)
 
     def record_turn(self, user_text: str, assistant_text: str, channel: str, session_id: str, tool_result: Any = None, turn_id=None):
+        if self.using_mmtr:
+            return self.mmtr_backend.commit_turn(self.owner_id, session_id, turn_id, _text(user_text), _text(assistant_text), channel)
         if self.using_tencent:
             self.tencent_backend.submit_commit_turn(
                 self.resolve_owner(channel, session_id), session_id,
@@ -815,6 +839,10 @@ class MemoryManager:
 
     def observe_text(self, text: str, channel: str, session_id: str):
         """Promote only explicit, high-signal statements into long-term memory."""
+        if self.using_mmtr:
+            # Core facts and feelings need explicit structured extraction. Do
+            # not keep an unbounded second copy in the legacy fact tables.
+            return
         self._learn_local_preferences_v2(text, channel, session_id)
         if self.using_tencent:
             # TencentDB extracts long-term atoms from committed conversations;
@@ -892,7 +920,14 @@ class MemoryManager:
             cursor = db.execute("UPDATE memory_secrets SET status='deleted',updated_at=? WHERE user_id=? AND name=? AND status='active'", (_now(), self.owner_id, _text(name)))
         return cursor.rowcount > 0
 
+    def finalize_session(self, user_id: str, session_id: str):
+        backend = self.mmtr_backend or self.tencent_backend
+        if backend is not None:
+            return backend.finalize_session(self.owner_id if self.using_mmtr else user_id, session_id)
+
     def close(self):
         """Flush and release the selected remote backend, if any."""
         if self.tencent_backend is not None:
             self.tencent_backend.close()
+        if self.mmtr_backend is not None:
+            self.mmtr_backend.close()

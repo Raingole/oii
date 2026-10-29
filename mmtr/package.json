@@ -1,0 +1,11 @@
+{
+  "name": "memorable-memory-to-remember",
+  "version": "0.1.0",
+  "description": "An embeddable, decaying associative memory layer for agents",
+  "type": "module",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "bridge.mjs", "examples", "README.md", "LICENSE"],
+  "engines": { "node": ">=22.13.0" },
+  "license": "MIT",
+  "scripts": { "test": "node --test", "demo": "node examples/dumplings.mjs" }
+}

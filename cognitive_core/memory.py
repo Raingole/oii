@@ -123,14 +123,23 @@ class LegacyMemoryPort:
     def __init__(self, manager: Any, user_id: str = "owner"):
         self.manager, self.user_id = manager, user_id; self.degraded=False; self.degraded_since=None; self.failure_reason=""; self.fallback_count=0; self.recovered_at=None
     async def search(self, query: str, top_k: int = 8, context_budget: int = 4000, **kwargs: Any) -> list[MemoryItem]:
-        text = await asyncio.to_thread(self.manager.retrieve_prompt, kwargs.get("user_id", self.user_id), kwargs.get("channel", "controller"), kwargs.get("session_id", "cognitive"), query, kwargs.get("turn_id"))
+        options = {"context_budget": context_budget} if getattr(self.manager, "using_mmtr", False) else {}
+        text = await asyncio.to_thread(self.manager.retrieve_prompt, kwargs.get("user_id", self.user_id), kwargs.get("channel", "controller"), kwargs.get("session_id", "cognitive"), query, kwargs.get("turn_id"), **options)
+        if getattr(self.manager, "using_mmtr", False):
+            # quiet output is unlabelled prose, and core/commitments must stay whole.
+            backend = self.manager.mmtr_backend
+            if backend.degraded:
+                self._failed(RuntimeError(backend.failure_reason))
+            else:
+                self.degraded = False
+            return [MemoryItem(text)] if text and top_k > 0 else []
         return [MemoryItem(line[2:].strip()) for line in text.splitlines() if line.startswith("-") and len(line) <= context_budget][:top_k]
     async def store(self, text: str, metadata: dict[str, Any] | None = None) -> bool:
         meta=metadata or {}; channel=meta.get("channel", meta.get("source", "cognitive")); session=meta.get("session_id", "cognitive")
         # record_turn is the existing single write path that persists locally and
         # invokes the configured Tencent Memory commit hook when enabled.
         try:
-            await asyncio.to_thread(self.manager.record_turn, text, "", channel, session, meta.get("tool_result"), meta.get("turn_id")); self.degraded=False; return True
+            await asyncio.to_thread(self.manager.record_turn, text, "", channel, session, meta.get("tool_result"), meta.get("turn_id", meta.get("event_id"))); self.degraded=False; return True
         except Exception as exc: self._failed(exc); return False
     async def update(self, memory_id: str, text: str, metadata: dict[str, Any] | None = None) -> bool:
         backend=getattr(self.manager,"tencent_backend",None)
@@ -151,7 +160,7 @@ class LegacyMemoryPort:
         if hasattr(value, "__await__"): value = await value
         return value
     async def health(self) -> bool:
-        backend=getattr(self.manager,"tencent_backend",None)
+        backend=getattr(self.manager,"mmtr_backend",None) or getattr(self.manager,"tencent_backend",None)
         try:
             ok=bool(await self._backend_call(backend.health)) if backend is not None else True
             if ok and self.degraded:self.recovered_at=__import__("time").time()

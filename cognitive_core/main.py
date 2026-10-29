@@ -5,7 +5,7 @@ import asyncio
 from aiohttp import web
 from .api import create_app
 from .runtime import CognitiveCore
-from .memory import TencentMemoryAdapter, FallbackMemoryPort
+from .memory import TencentMemoryAdapter, FallbackMemoryPort, LegacyMemoryPort
 from controller.approval_service import ApprovalService
 from config.config_loader import load_config
 from config.logger import setup_logging
@@ -25,6 +25,11 @@ def main() -> None:
         user_id=str(config.get("tencent_memory_user_id") or config.get("owner_id", "gu")), api_version=str(config.get("tencent_memory_api_version", "v2")),
     ) if base else None
     memory = FallbackMemoryPort(remote_memory) if remote_memory else None
+    memory_manager = None
+    if str(config.get("memory_backend", "")).strip().lower() == "mmtr":
+        from core.memory.manager import MemoryManager
+        memory_manager = MemoryManager(config)
+        memory = LegacyMemoryPort(memory_manager, memory_manager.owner_id)
     core = CognitiveCore(db_path=os.getenv("COGNITIVE_DB_PATH") or str(cc.get("db_path", "data/cognitive/cognitive.db")), config={**cc, "api_token": os.getenv("COGNITIVE_CORE_API_TOKEN") or cc.get("api_token", "")}, memory=memory)
     if cc.get("llm_enabled", False):
         logger = setup_logging(config)
@@ -38,7 +43,12 @@ def main() -> None:
         except Exception as exc:
             logger.bind(tag="cognitive_core").error(f"cognitive LLM provider unavailable; fallback planner remains active: {exc}")
     approval = ApprovalService(core.store.path)
-    web.run_app(create_app(core, approval=approval), host=os.getenv("COGNITIVE_CORE_HOST", "127.0.0.1"), port=int(os.getenv("COGNITIVE_CORE_PORT", "8010")))
+    app = create_app(core, approval=approval)
+    if memory_manager is not None:
+        async def close_memory(_app):
+            await asyncio.to_thread(memory_manager.close)
+        app.on_cleanup.append(close_memory)
+    web.run_app(app, host=os.getenv("COGNITIVE_CORE_HOST", "127.0.0.1"), port=int(os.getenv("COGNITIVE_CORE_PORT", "8010")))
 
 
 if __name__ == "__main__": main()
