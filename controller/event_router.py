@@ -40,6 +40,7 @@ def explicit_bilibili_topic(text: str) -> str | None:
             continue
         topic = match.group(1).strip().strip(' \t\r\n：:，,。.!！?？「」“”\"\'')
         topic = re.sub(r'(?:并)?(?:加入|收录|存入)(?:知识库|知识花园)?$', '', topic).strip()
+        topic = re.sub(r'\s*(?:这个|那个)?梗(?:视频|出处|是什么|的)?$', '', topic).strip()
         if topic.lower() in {'梗', '一个梗', '个梗', '新梗', '一个新梗', '随机梗', '热梗'}:
             return None
         if re.match(r'^(?:的|是|了|到|出来|什么|啥|哪|怎么|为啥|为什么)', topic):

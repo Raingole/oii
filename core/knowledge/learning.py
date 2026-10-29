@@ -13,15 +13,24 @@ from cognitive_core.runtime import logger
 from cognitive_core.llm import LLMDecisionError
 
 
+def contains_credential_value(text):
+    """Reject explicit secret assignments without blocking ordinary jargon like “token来token来”."""
+    value = str(text or '')
+    return bool(
+        re.search(r'(?:密码|口令|验证码|api[\s_-]*key|cookie|sessdata|secret)\s*(?:=|:|：|是|为)\s*[A-Za-z0-9_./+=~-]{8,}', value, re.I)
+        or re.search(r'(?<![A-Za-z0-9])(?:token|access[_ -]?token|bearer)(?![A-Za-z0-9])\s*(?:=|:|：|是|为|\s)\s*[A-Za-z0-9_./+=~-]{20,}', value, re.I)
+    )
+
+
 def clean_interests(value, text):
-    if re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret', text, re.I):
+    if contains_credential_value(text):
         return []
     result = []
     for item in value[:2] if isinstance(value, list) else []:
         if not isinstance(item, dict):
             continue
         topic, evidence = item.get('topic'), item.get('evidence')
-        if isinstance(topic,str) and re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret',topic,re.I):
+        if isinstance(topic,str) and contains_credential_value(topic):
             continue
         meaningful = re.sub(r'\[[^\]]*\]','',evidence).strip() if isinstance(evidence,str) else ''
         if isinstance(topic, str) and isinstance(evidence, str) and 2 <= len(topic.strip()) <= 60 and len(meaningful)>=2 and evidence in text:
@@ -33,7 +42,7 @@ def topic_title_relevance(topic, title):
     """Return a conservative lexical relevance score for a Bilibili result title."""
     query = str(topic or '').lower()
     query = re.sub(r'^(?:b站|哔哩哔哩)', '', query)
-    query = re.sub(r'(?:相关)?(?:网络)?梗$', '', query)
+    query = re.sub(r'(?:这个|那个)?(?:相关)?(?:网络)?梗(?:视频|出处|是什么|的)?$', '', query)
     query = re.sub(r'^(?:搜索|查找|学习|主题|关键词)', '', query)
     query = re.sub(r'^[的关于]+|[的相关]+$', '', query)
     query = re.sub(r'[^\w\u3400-\u9fff]+', '', query)
@@ -244,10 +253,13 @@ class LearningService:
         topic = str(topic or '').strip()[:80]
         if scope != self.meme_scope():
             return {'status':'owner_scope_unavailable'}
-        if len(topic) < 2 or re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret', topic, re.I):
+        if len(topic) < 2 or contains_credential_value(topic):
             return {'status':'invalid_query'}
         if self.task and not self.task.done():
             return {'status':'already_running'}
+        # Keep the exact requested topic pending until success. If this attempt
+        # fails, “retry” must repeat this search rather than start random meme discovery.
+        self.store.interest(scope, topic, '用户明确指定的即时学习主题', self.clock())
         self.task = asyncio.create_task(self._manual_topic_run(scope, topic))
         return {'status':'started'}
 
@@ -675,7 +687,7 @@ class LearningService:
             query = str(arguments.get('query','')).strip()
             if not 2 <= len(query) <= 80:
                 raise ValueError('query length must be 2..80')
-            if re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret',query,re.I):
+            if contains_credential_value(query):
                 raise ValueError('query contains private credential markers')
             return await self.client.call('search_bilibili_videos',{'query':query,'limit':5})
         if name == 'bilibili_learn_topic':
