@@ -18,6 +18,20 @@ spec.loader.exec_module(manager)
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_preparation_uses_updated_checkout_in_fresh_process(self):
+        folder = self.root / 'deploy'
+        folder.mkdir()
+        script = folder / 'service_manager.py'
+        script.write_text("from pathlib import Path\ndef prepare_dependencies(*, skip_python=False):\n Path('fresh-result').write_text(str(skip_python))\n return False\n")
+        with patch.object(manager, 'python_bin', return_value=sys.executable), patch.object(manager, 'prepare_dependencies', side_effect=AssertionError('stale code')):
+            self.assertFalse(manager.prepare_updated_dependencies(skip_python=True))
+            self.assertEqual((self.root / 'fresh-result').read_text(), 'True')
+            script.write_text("def prepare_dependencies(*, skip_python=False):\n return True\n")
+            self.assertTrue(manager.prepare_updated_dependencies())
+            script.write_text("raise RuntimeError('new code failed')\n")
+            with self.assertRaisesRegex(RuntimeError, 'preparation failed'):
+                manager.prepare_updated_dependencies()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -196,7 +210,7 @@ class GitUpdateTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(manager, "ROOT", self.root))
         self.stack.enter_context(patch.dict(os.environ, {"UPDATE_REMOTE": "origin", "UPDATE_BRANCH": "main"}))
-        self.prepare = self.stack.enter_context(patch.object(manager, "prepare_dependencies", return_value=False))
+        self.prepare = self.stack.enter_context(patch.object(manager, "prepare_updated_dependencies", return_value=False))
         self.restart = self.stack.enter_context(patch.object(manager, "restart_runtime"))
 
     def publish(self, name="app.txt", content="after\n"):

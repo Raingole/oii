@@ -552,6 +552,22 @@ def restart_runtime():
     systemctl("is-active", service_name(), capture=True)
 
 
+def prepare_updated_dependencies(*, skip_python=False):
+    # A running updater retains its old Python functions after git merge.
+    # Load preparation from the checkout in a fresh interpreter, including its
+    # backend policy and imports, before deciding what services to install.
+    source = (
+        "import runpy,sys; "
+        "module=runpy.run_path(sys.argv[1]); "
+        "changed=module['prepare_dependencies'](skip_python=sys.argv[2]=='1'); "
+        "sys.exit(0 if changed else 10)"
+    )
+    result = run([python_bin(), "-B", "-c", source, ROOT / "deploy/service_manager.py", "1" if skip_python else "0"], check=False)
+    if result.returncode not in {0, 10}:
+        raise RuntimeError("Updated dependency preparation failed; retry the update after fixing the reported error")
+    return result.returncode == 0
+
+
 def update_repository(*, no_deps=False, no_restart=False):
     remote = os.environ.get("UPDATE_REMOTE", "origin")
     branch = os.environ.get("UPDATE_BRANCH", "main")
@@ -581,7 +597,7 @@ def update_repository(*, no_deps=False, no_restart=False):
             write_json(pending_path, pending)
             git("merge", "--ff-only", target)
             info(f"Updated to {target[:7]}; rollback tag: {tag}")
-        prepared = prepare_dependencies(skip_python=no_deps)
+        prepared = prepare_updated_dependencies(skip_python=no_deps)
         if changed or prepared or pending:
             if not no_restart:
                 restart_runtime()
