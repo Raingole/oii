@@ -96,14 +96,17 @@ class MmtrMemoryAdapter:
 
     health = health_check
 
-    def recall_for_turn(self, user_id, session_id, turn_id, query, context_budget=None) -> str:
+    def recall_details(self, user_id, session_id, turn_id, query, context_budget=None) -> dict:
         try:
             return self.call("recall", str(query), {
                 "scope": str(user_id), "stream": str(session_id or "default"),
-                "budget": min(self.budget, int(context_budget)) if context_budget is not None else self.budget, "style": "quiet",
+                "budget": min(self.budget, int(context_budget)) if context_budget is not None else self.budget, "style": "full",
             })
         except Exception:
-            return ""
+            return {"context": "", "items": [], "core": [], "connections": [], "pipeline": [], "error": "memory_unavailable"}
+
+    def recall_for_turn(self, user_id, session_id, turn_id, query, context_budget=None) -> str:
+        return self.recall_details(user_id, session_id, turn_id, query, context_budget)["context"]
 
     def commit_turn(self, user_id, session_id, turn_id, user_text, assistant_text, source="unknown"):
         # Deterministic fallback extraction: compact text, no invented feelings or

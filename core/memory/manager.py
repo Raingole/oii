@@ -22,6 +22,7 @@ from typing import Any
 
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
+from config.memory_policy import selected_memory_backend
 
 from .vault import SecretVault
 from .identity import IdentityResolver
@@ -61,9 +62,7 @@ class MemoryManager:
 
     def __init__(self, config: dict):
         self.config = config or {}
-        configured_backend = str(self.config.get("memory_backend", "legacy"))
-        memory_enabled = str(self.config.get("tencent_memory_enabled", False)).strip().lower() in {"1", "true", "yes", "on"}
-        self.backend_name = ("mmtr" if configured_backend.strip().lower() == "mmtr" else ("tencent" if memory_enabled else str(configured_backend))).strip().lower()
+        self.backend_name = selected_memory_backend(self.config)
         selected = self.config.get("selected_module", {}).get("Memory", "")
         memory_config = self.config.get("Memory", {}).get(selected, {})
         memory_config = memory_config if isinstance(memory_config, dict) else {}

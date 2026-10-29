@@ -83,7 +83,7 @@ bash auto-start.sh run
 配置先合并 `config.yaml` 和 `data/.config.yaml`，私有值优先；`.env` 可设置以下部署开关：
 
 ```dotenv
-# 默认 auto。MMTR 不另起腾讯服务；仅选用本地腾讯后端时才自动拉起 MemoryCore。
+# MMTR 优先策略开启时始终不启动腾讯服务，旧的强制开关也不覆盖此策略。
 START_MEMORY_CORE=auto
 START_UI=1
 START_MCP=1
@@ -113,3 +113,16 @@ Android 的短信守护脚本和 `TencentDB-Agent-Memory/` 内部脚本是相应
 当前工作机为 Windows；未在真实云主机安装 systemd 服务、下载完整模型或执行生产依赖安装。
 
 验证结果：21 项部署测试通过，Python 全套 74 项通过，MMTR Node 测试 24 项通过；Shell 语法与入口帮助命令通过。
+
+## MMTR 记忆观察台
+
+更新并重启后访问 `http://服务器IP:8010/memory.html`（UI_PORT 可配置）。
+获取访问密钥：
+
+```bash
+sudo bash auto-start.sh token
+```
+
+将命令输出的密钥填入页面连接框。密钥保存在私有目录或来自显式配置，不提交 Git。
+目前默认优先 MMTR；旧腾讯开关与 `START_MEMORY_CORE=1` 不会重新启用腾讯。
+完整说明及验证范围见 [记忆观察台](mmtr-observer.md)。

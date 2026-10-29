@@ -123,16 +123,19 @@ class LegacyMemoryPort:
     def __init__(self, manager: Any, user_id: str = "owner"):
         self.manager, self.user_id = manager, user_id; self.degraded=False; self.degraded_since=None; self.failure_reason=""; self.fallback_count=0; self.recovered_at=None
     async def search(self, query: str, top_k: int = 8, context_budget: int = 4000, **kwargs: Any) -> list[MemoryItem]:
-        options = {"context_budget": context_budget} if getattr(self.manager, "using_mmtr", False) else {}
-        text = await asyncio.to_thread(self.manager.retrieve_prompt, kwargs.get("user_id", self.user_id), kwargs.get("channel", "controller"), kwargs.get("session_id", "cognitive"), query, kwargs.get("turn_id"), **options)
         if getattr(self.manager, "using_mmtr", False):
-            # quiet output is unlabelled prose, and core/commitments must stay whole.
             backend = self.manager.mmtr_backend
+            details = await asyncio.to_thread(backend.recall_details, self.manager.owner_id,
+                kwargs.get("session_id", "cognitive"), kwargs.get("turn_id"), query, context_budget)
             if backend.degraded:
                 self._failed(RuntimeError(backend.failure_reason))
+                return []
             else:
                 self.degraded = False
-            return [MemoryItem(text)] if text and top_k > 0 else []
+            # Exactly this context is passed to the model. Capture diagnostics
+            # from the same recall; observing them later never recalls again.
+            return [MemoryItem(details["context"], metadata={"mmtr": details})] if top_k > 0 else []
+        text = await asyncio.to_thread(self.manager.retrieve_prompt, kwargs.get("user_id", self.user_id), kwargs.get("channel", "controller"), kwargs.get("session_id", "cognitive"), query, kwargs.get("turn_id"))
         return [MemoryItem(line[2:].strip()) for line in text.splitlines() if line.startswith("-") and len(line) <= context_budget][:top_k]
     async def store(self, text: str, metadata: dict[str, Any] | None = None) -> bool:
         meta=metadata or {}; channel=meta.get("channel", meta.get("source", "cognitive")); session=meta.get("session_id", "cognitive")

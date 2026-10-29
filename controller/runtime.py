@@ -15,7 +15,7 @@ class ControllerRuntime:
     def __init__(self, config: dict[str, Any], legacy_memory: Any = None) -> None:
         cc = config.get("cognitive_core", {}) if isinstance(config.get("cognitive_core", {}), dict) else {}
         db_path = str(cc.get("db_path", "data/cognitive/cognitive.db"))
-        memory = LegacyMemoryPort(legacy_memory, str(config.get("owner_id", "owner"))) if legacy_memory is not None and cc.get("share_legacy_memory", True) else InMemoryAdapter()
+        memory = LegacyMemoryPort(legacy_memory, str(config.get("owner_id", "owner"))) if legacy_memory is not None and (getattr(legacy_memory, "using_mmtr", False) or cc.get("share_legacy_memory", True)) else InMemoryAdapter()
         self.core = CognitiveCore(db_path=db_path, agent_id=str(cc.get("agent_id", "central-controller")), memory=memory, config=cc)
         self.outbox = ActionOutbox(db_path)
         self.approval = ApprovalService(db_path)

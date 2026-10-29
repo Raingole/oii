@@ -9,6 +9,7 @@ from .memory import TencentMemoryAdapter, FallbackMemoryPort, LegacyMemoryPort
 from controller.approval_service import ApprovalService
 from config.config_loader import load_config
 from config.logger import setup_logging
+from config.memory_policy import selected_memory_backend
 from core.utils.modules_initialize import initialize_modules
 from .llm import ExistingProviderLLM
 
@@ -16,7 +17,8 @@ from .llm import ExistingProviderLLM
 def main() -> None:
     config = asyncio.run(load_config())
     cc = config.get("cognitive_core", {}) if isinstance(config.get("cognitive_core", {}), dict) else {}
-    use_remote_memory = os.getenv("COGNITIVE_MEMORY_BACKEND", "remote" if config.get("tencent_memory_enabled", False) else "local").lower() != "local"
+    backend = selected_memory_backend(config)
+    use_remote_memory = backend != "mmtr" and os.getenv("COGNITIVE_MEMORY_BACKEND", "remote" if config.get("tencent_memory_enabled", False) else "local").lower() != "local"
     base = (os.getenv("TENCENT_MEMORY_URL") or config.get("tencent_memory_base_url", "")) if use_remote_memory else ""
     remote_memory = TencentMemoryAdapter(
         base, os.getenv("TENCENT_MEMORY_API_KEY") or str(config.get("tencent_memory_api_key", "")),
@@ -26,7 +28,7 @@ def main() -> None:
     ) if base else None
     memory = FallbackMemoryPort(remote_memory) if remote_memory else None
     memory_manager = None
-    if str(config.get("memory_backend", "")).strip().lower() == "mmtr":
+    if backend == "mmtr":
         from core.memory.manager import MemoryManager
         memory_manager = MemoryManager(config)
         memory = LegacyMemoryPort(memory_manager, memory_manager.owner_id)

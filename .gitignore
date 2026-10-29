@@ -19,3 +19,5 @@ tmp/
 
 # Local deployment fingerprints and update/restart state.
 data/deploy/
+data/memory/
+data/cognitive/

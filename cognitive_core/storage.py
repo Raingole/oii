@@ -34,6 +34,12 @@ class StateStore:
             );
             CREATE INDEX IF NOT EXISTS idx_conversation_turns_session
                 ON conversation_turns(session_id, created_at);
+            CREATE TABLE IF NOT EXISTS memory_activity (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE NOT NULL, session_id TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP, payload TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_activity_session ON memory_activity(session_id,seq);
             """)
             if db.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0: db.execute("INSERT INTO schema_version(version) VALUES(1)")
             db.commit()
@@ -119,3 +125,36 @@ class StateStore:
             if assistant_text:
                 history.append({"role": "assistant", "content": assistant_text})
         return history
+
+    def save_memory_activity(self, activity: dict[str, Any]) -> None:
+        db = sqlite3.connect(self.path)
+        try:
+            if not activity.get("input_text") and activity.get("parent_event_id"):
+                row = db.execute("SELECT payload FROM memory_activity WHERE event_id=?", (activity["parent_event_id"],)).fetchone()
+                if row:
+                    activity["input_text"] = json.loads(row[0]).get("input_text", "")
+            db.execute("INSERT OR REPLACE INTO memory_activity(event_id,session_id,payload) VALUES (?,?,?)",
+                       (activity["event_id"], activity["session_id"], json.dumps(activity, ensure_ascii=False)))
+            # Observation history is bounded and never becomes a permanent
+            # second archive of the memory content.
+            db.execute("DELETE FROM memory_activity WHERE created_at<datetime('now','-7 days') OR seq NOT IN (SELECT seq FROM memory_activity ORDER BY seq DESC LIMIT 120)")
+            db.commit()
+        finally:
+            db.close()
+
+    def memory_activity(self, session_id: str = "", event_id: str = "") -> dict[str, Any]:
+        db = sqlite3.connect(self.path)
+        try:
+            rows = db.execute("SELECT seq,session_id,payload FROM memory_activity WHERE created_at>=datetime('now','-7 days') ORDER BY seq DESC LIMIT 120").fetchall()
+        finally:
+            db.close()
+        sessions = {}
+        for seq, session, payload in rows:
+            value = json.loads(payload)
+            sessions.setdefault(session, {"id": session, "source": value["source"], "latest_text": value.get("input_text", "")[:70], "timestamp": value["timestamp"]})
+        chosen = session_id or next(iter(sessions), "")
+        events = [{"seq": seq, **json.loads(payload)} for seq, session, payload in rows if session == chosen][:40]
+        selected = next((value for value in events if value["event_id"] == event_id), None) if event_id else next(iter(events), None)
+        return {"revision": rows[0][0] if rows else 0, "sessions": list(sessions.values())[:30],
+                "session_id": chosen, "events": [{key: value.get(key) for key in ("event_id", "source", "timestamp", "input_text", "mode")} for value in events],
+                "selected": selected}

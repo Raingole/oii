@@ -16,20 +16,20 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
         return
 
     def _proxy_api(self):
-        if not self.path.startswith("/api/sim-qq/"):
+        if not self.path.startswith(("/api/sim-qq/", "/api/memory/")):
             return False
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else None
         target = f"http://127.0.0.1:{self.backend_port}{self.path}"
         request = urllib.request.Request(target, data=body, method=self.command)
-        for name in ("Content-Type", "Cookie"):
+        for name in ("Content-Type", "Cookie", "Authorization"):
             if self.headers.get(name):
                 request.add_header(name, self.headers[name])
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 payload = response.read()
                 self.send_response(response.status)
-                for name in ("Content-Type", "Set-Cookie"):
+                for name in ("Content-Type", "Set-Cookie", "Cache-Control"):
                     value = response.headers.get(name)
                     if value:
                         self.send_header(name, value)
@@ -41,6 +41,7 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
             self.send_response(error.code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(payload)
         except urllib.error.URLError:
@@ -53,6 +54,8 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        if self.path in {"/memory", "/memory/"}:
+            self.path = "/memory.html"
         if not self._proxy_api():
             super().do_GET()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from aiohttp import web
 from .contracts import CognitiveEvent
 from .runtime import CognitiveCore
+from .observer_api import register_observer
 import uuid
 
 TRACE_ID = web.AppKey("trace_id", str)
@@ -90,4 +91,5 @@ def create_app(core: CognitiveCore, dispatcher=None, approval=None) -> web.Appli
     app.router.add_get("/health", health); app.router.add_post("/events", event); app.router.add_get("/state", state); app.router.add_post("/heartbeat/run-once", heartbeat)
     app.router.add_post("/controller/approvals", create_approval); app.router.add_get("/controller/approvals/{approval_id}", get_approval)
     app.router.add_post("/controller/approvals/{approval_id}/approve", approve_approval)
+    register_observer(app, lambda: core, core.config)
     return app

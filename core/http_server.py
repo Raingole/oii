@@ -16,6 +16,7 @@ from core.desktop_control import DesktopControl
 from core.notification_hub import WindowsNotificationHub
 from core.mailpilot_webhook import MailPilotWebhookHandler
 from core.sms_webhook import SmsWebhookHandler
+from cognitive_core.observer_api import register_observer
 
 TAG = __name__
 
@@ -66,6 +67,7 @@ class SimpleHttpServer:
 
             if port:
                 app = web.Application()
+                register_observer(app, lambda: getattr(getattr(self.websocket_server, "cognitive_runtime", None), "core", None), self.config)
                 qq_service = getattr(self.websocket_server, "qq_service", None)
                 if qq_service is not None:
                     event_router = getattr(self.websocket_server, "event_router", None)

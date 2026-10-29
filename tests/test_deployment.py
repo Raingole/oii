@@ -42,7 +42,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("ui", names)
 
     def test_local_and_remote_tencent_selection(self):
-        self.assertTrue(manager.memory_is_local({"memory_backend": "tencent"}))
+        self.assertTrue(manager.memory_is_local({"memory_backend": "tencent", "mmtr": {"preferred": False}}))
         self.assertFalse(manager.memory_is_local({"memory_backend": "tencent", "tencent_memory_base_url": "https://memory.example.com:8420"}))
         self.assertFalse(manager.memory_is_local({"memory_backend": "legacy", "tencent_memory_enabled": False}))
 
@@ -61,10 +61,10 @@ class DeploymentTests(unittest.TestCase):
             run.return_value = SimpleNamespace(stdout="22.13.0\n")
             self.assertEqual(manager.node_check({"memory_backend": "mmtr"}), "node")
             with self.assertRaisesRegex(RuntimeError, "22.16.0"):
-                manager.node_check({"memory_backend": "tencent"})
+                manager.node_check({"memory_backend": "tencent", "mmtr": {"preferred": False}})
             with patch.dict(os.environ, {"START_MEMORY_CORE": "1"}):
-                with self.assertRaisesRegex(RuntimeError, "22.16.0"):
-                    manager.node_check({"memory_backend": "mmtr"})
+                self.assertEqual(manager.node_check({"memory_backend": "mmtr"}), "node")
+                self.assertFalse(manager.start_tencent({"memory_backend": "tencent"}))
 
     def test_dependency_fingerprints_avoid_reinstall_until_inputs_change(self):
         requirement = self.root / "requirements.txt"

@@ -1,6 +1,7 @@
 import os
 import asyncio
 import yaml
+from config.memory_policy import apply_memory_policy
 from collections.abc import Mapping
 try:
     from config.manage_api_client import (
@@ -78,6 +79,7 @@ async def load_config():
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
+    apply_memory_policy(config)
     _apply_llm_environment(config)
     # MailPilot runs as a separate process. Environment variables override
     # only the local webhook integration settings.

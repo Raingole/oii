@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f7fb">
+  <meta name="referrer" content="no-referrer">
+  <title>MMTR 记忆观察台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233477ee'/%3E%3Ctext x='7' y='23' fill='white' font-size='22' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/memory.css">
+  <script src="/memory.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="/memory.html"><strong>MMTR</strong><span>记忆观察台</span></a>
+    <nav aria-label="页面导航"><a href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg>返回对话</a><span class="divider"></span><button id="settings" class="plain" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.7 2.2-2 .9-2.2-.5L3 8.4l1.6 1.7v2.3L3 14.1l1.6 2.8 2.2-.5 2 .9.7 2.2h3.2l.7-2.2 2-.9 2.2.5 1.6-2.8-1.6-1.7v-2.3l1.6-1.7-1.6-2.8-2.2.5-2-.9L12.7 3z"/><circle cx="11.1" cy="11.3" r="3"/></svg>连接设置</button></nav>
+  </header>
+  <div class="shell">
+    <aside class="rail">
+      <h2>对话记录</h2>
+      <label class="sr-only" for="session">当前会话</label>
+      <select id="session"><option value="">当前会话</option></select>
+      <div id="timeline" class="timeline" aria-label="对话轮次"><p class="rail-empty">连接后查看对话记录</p></div>
+      <div class="rail-status"><span id="connection-dot" class="dot"></span><span id="connection">尚未连接</span></div>
+    </aside>
+    <main>
+      <div class="page-title">
+        <div><h1>一段对话，唤起了什么</h1><p>查看真实召回与认知引用</p></div>
+        <div class="refresh-controls"><label class="auto-label" for="auto">自动刷新<input type="checkbox" id="auto" role="switch" checked><span class="switch" aria-hidden="true"></span></label><button id="refresh" class="outline" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7"/></svg>立即刷新</button></div>
+      </div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="current" aria-labelledby="current-title"><h2 id="current-title">当前对话</h2><p id="current-text">等待一段真实对话</p><div id="current-meta" class="current-meta"></div></section>
+      <div class="workspace">
+        <section class="graph-panel" aria-labelledby="graph-title">
+          <div class="graph-toolbar"><h2 id="graph-title">关联图</h2><div class="segmented" role="group" aria-label="关联显示方式"><button id="sentences" type="button" aria-pressed="true">句子</button><button id="words" type="button" aria-pressed="false">词语</button></div></div>
+          <div class="graph-viewport"><div id="graph" class="graph" aria-label="当前对话与记忆、认知引用的关联"><div class="graph-empty"><span class="empty-orbit" aria-hidden="true"></span><h3>还没有本轮关联</h3><p>对话发生后，实际召回的词句会出现在这里。</p></div></div></div>
+          <div class="legend"><span><i class="blue"></i>对话关联</span><span><i class="purple"></i>认知引用</span><span id="node-count" class="node-count"></span></div>
+        </section>
+        <section class="inspector" aria-labelledby="detail-title"><h2 id="detail-title">词句详情</h2><div id="detail" class="detail"><p class="detail-empty">点击一个关联词句，查看它为什么出现在本轮对话中。</p></div></section>
+      </div>
+      <section class="cognition" aria-labelledby="cognition-title"><h2 id="cognition-title">认知引用</h2><div id="cognition-list" class="cognition-list"><p class="detail-empty">尚无可展示的认知引用</p></div></section>
+      <footer><span>仅展示实际检索结果与结构化决策摘要</span><span id="updated">等待连接</span></footer>
+    </main>
+  </div>
+  <dialog id="connect-dialog" aria-labelledby="connect-title">
+    <form id="connect-form"><div class="dialog-heading"><h2 id="connect-title">连接观察台</h2><button id="close-dialog" class="plain" type="button" aria-label="关闭连接设置">×</button></div><p>输入观察密钥，查看你的对话关联。</p><label for="token">观察密钥</label><input id="token" type="password" autocomplete="off" required placeholder="粘贴观察密钥"><p class="key-help">可在服务器项目目录运行 <code>sudo bash auto-start.sh token</code> 获取。密钥仅保留在当前浏览器会话中。</p><p id="connect-error" role="alert"></p><div class="dialog-actions"><button id="disconnect" type="button" class="plain">断开连接</button><button class="primary" type="submit">连接</button></div></form>
+  </dialog>
+</body>
+</html>

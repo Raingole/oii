@@ -470,6 +470,7 @@ export class MemorableMemory {
         parts.push(candidate.content); used += separator + candidate.content.length;
         const row = candidate.row;
         items.push({ id: row.id, kind: row.kind, score: candidate.score, importance: row.importance,
+          entities: parse(row.entities), themes: parse(row.themes), anchors: parse(row.anchors),
           createdAt: new Date(row.created).toISOString(), reasons: reasons.get(row.id), content: candidate.content,
           channels: channelsFor(row.id),
           promise: promises.get(row.id) || null });
@@ -483,7 +484,10 @@ export class MemorableMemory {
       }
       this.db.prepare('INSERT INTO recall_state VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET round=excluded.round').run(scope, round);
       const context = parts.join('\n');
-      return style === 'quiet' ? context : { context, core, items, omittedReminders, pipeline: ['vector', 'spread', 'calendar', 'rerank', 'diversity', 'assemble'] };
+      const selectedIds = items.map(item => item.id);
+      const marks = selectedIds.map(() => '?').join(',');
+      const connections = selectedIds.length ? this.db.prepare(`SELECT a,b,kind,weight FROM edges WHERE a IN (${marks}) AND b IN (${marks})`).all(...selectedIds, ...selectedIds) : [];
+      return style === 'quiet' ? context : { context, core, items, connections, omittedReminders, pipeline: ['vector', 'spread', 'calendar', 'rerank', 'diversity', 'assemble'] };
     });
   }
 

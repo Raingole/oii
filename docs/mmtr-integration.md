@@ -18,7 +18,8 @@ serve/
 ```
 
 MMTR 包不依赖 Python、腾讯服务或现有中控。中控本身仍沿用 requirements.txt 的依赖。
-本次新增可选后端，不迁移、覆盖既有记忆，也不改本机私有配置。
+目前默认优先使用 MMTR，暂不启用腾讯记忆；旧腾讯数据保留，不自动迁移。
+`mmtr.preferred: true` 优先于旧私有配置中的后端选择与腾讯开关。
 
 ## 启用
 
@@ -26,7 +27,9 @@ MMTR 包不依赖 Python、腾讯服务或现有中控。中控本身仍沿用 r
 
 ```yaml
 memory_backend: mmtr
+tencent_memory_enabled: false
 mmtr:
+  preferred: true
   node: node  # 也可填 node 可执行文件的绝对路径
   database: data/memory/mmtr.db
   timeout: 10
@@ -36,7 +39,7 @@ cognitive_core:
   share_legacy_memory: true
 ```
 
-然后按原方式启动 `app.py`。显式选择 mmtr 优先于旧的 `tencent_memory_enabled` 标志。
+然后按原方式启动 `app.py`。默认的 MMTR 优先策略会关闭腾讯记忆，并让认知核心共用同一记忆入口。
 QQ/ESP 和嵌入式 Cognitive Core 通过同一个 MemoryManager 访问该库。
 独立 `python -m cognitive_core.main` 同样识别配置并在退出时关闭桥接进程。
 启动时 Node 不可用将明确报错，避免误以为持久化已经生效；运行期间检索失败返回空上下文，并将 adapter.degraded 标记为 true。
@@ -95,7 +98,7 @@ MMTR 不自行发送提醒：窗口内的承诺在下一次 recall 浮现，离�
 若要主动提醒，应由应用调度取回结果并按现有发送机制处理。
 关系 delta 在会话结束才结算，promise 的兑现／失约作为独立事件即时结算。
 
-回退时将 memory_backend 改回 legacy 或 tencent，mmtr.db 保留以供再次启用。
+如未来明确需要切换后端，须先设 `mmtr.preferred: false`，再修改 `memory_backend`；使用腾讯时还需配置对应服务。当前配置保持腾讯关闭。mmtr.db 保留以供再次启用。
 原有数据库不会自动转换成三通道模型；历史迁移需要显式的字段映射和提取，避免伪造情绪。
 备份请在无写事务时复制 mmtr.db，或使用 SQLite 的备份机制。
 
@@ -109,3 +112,5 @@ node mmtr/examples/benchmark.mjs 1000
 ```
 
 测试结果与测量环境见 [验证记录](mmtr-validation.md)。
+
+当前对话的真实召回和认知引用可在 [记忆观察台](mmtr-observer.md) 查看。

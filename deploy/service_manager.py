@@ -24,6 +24,10 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 UNIT_DIR = Path("/etc/systemd/system")
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from config.memory_policy import apply_memory_policy, mmtr_preferred, selected_memory_backend
+from config.observer_access import observer_token
 
 
 def info(message):
@@ -84,7 +88,7 @@ print(json.dumps(merge(base,private)))
     result = run([python, "-c", source, ROOT / "config.yaml", ROOT / "data/.config.yaml"], capture=True, check=False)
     if result.returncode:
         raise RuntimeError("Cannot read YAML configuration. Check data/.config.yaml and install Python dependencies with auto-start.sh prepare")
-    return json.loads(result.stdout)
+    return apply_memory_policy(json.loads(result.stdout))
 
 
 def enabled(name, automatic):
@@ -117,12 +121,12 @@ def service_name():
 
 
 def node_check(config):
-    mmtr = str(config.get("memory_backend", "")).strip().lower() == "mmtr"
+    mmtr = selected_memory_backend(config) == "mmtr"
     value = os.environ.get("NODE_BIN") or (config.get("mmtr", {}).get("node", "node") if mmtr else "node")
     node = executable(value)
     version = run([node, "-p", "process.versions.node"], capture=True).stdout.strip()
     parts = tuple(int(x) for x in version.split(".")[:3])
-    tencent = enabled("START_MEMORY_CORE", memory_is_local(config))
+    tencent = start_tencent(config)
     minimum = (22, 16, 0) if tencent else (22, 13, 0)
     if parts < minimum:
         raise RuntimeError(f"Node >= {'.'.join(map(str, minimum))} required; found {version}")
@@ -130,11 +134,16 @@ def node_check(config):
 
 
 def memory_is_local(config):
-    if str(config.get("memory_backend", "")).strip().lower() == "mmtr":
+    if selected_memory_backend(config) == "mmtr":
         return False
     selected = true(config.get("tencent_memory_enabled")) or str(config.get("memory_backend", "")).lower() == "tencent"
     endpoint = urlsplit(str(config.get("tencent_memory_base_url", "http://127.0.0.1:8420")))
     return selected and endpoint.hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def start_tencent(config):
+    # During MMTR preference even an old START_MEMORY_CORE=1 is suspended.
+    return False if mmtr_preferred(config) else enabled("START_MEMORY_CORE", memory_is_local(config))
 
 
 def mail_config():
@@ -223,8 +232,8 @@ def prepare_dependencies(*, skip_python=False):
         write_json(stamp_path, stamp)
         changed = True
     config = load_config(python)
-    mmtr = str(config.get("memory_backend", "")).strip().lower() == "mmtr"
-    use_tencent = enabled("START_MEMORY_CORE", memory_is_local(config))
+    mmtr = selected_memory_backend(config) == "mmtr"
+    use_tencent = start_tencent(config)
     node = node_check(config) if mmtr or use_tencent else None
     if use_tencent:
         folder = ROOT / "TencentDB-Agent-Memory/MemoryCore"
@@ -258,7 +267,7 @@ def prepare_dependencies(*, skip_python=False):
 
 def specs(config, python):
     result = []
-    if enabled("START_MEMORY_CORE", memory_is_local(config)):
+    if start_tencent(config):
         endpoint = urlsplit(str(config.get("tencent_memory_base_url", "http://127.0.0.1:8420")))
         memory_port = port(endpoint.port or 8420)
         result.append({"name": "memory-core", "command": [python, str(ROOT / "deploy/memory-core/start_memory_core.py")],
@@ -351,7 +360,7 @@ def supervise():
         raise RuntimeError("The service supervisor requires Linux; use --help for commands")
     python = python_bin()
     config = load_config(python)
-    if str(config.get("memory_backend", "")).strip().lower() == "mmtr" or enabled("START_MEMORY_CORE", memory_is_local(config)):
+    if selected_memory_backend(config) == "mmtr" or start_tencent(config):
         os.environ["NODE_BIN"] = node_check(config)
     planned = specs(config, python)
     ports = [item["port"] for item in planned if "port" in item]
@@ -609,7 +618,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="OII service supervision and automatic updates")
     sub = parser.add_subparsers(dest="mode", required=True)
     start = sub.add_parser("start", help="run, prepare or install the service supervisor")
-    start.add_argument("action", nargs="?", default="run", choices=["run", "prepare", "install", "start", "restart", "stop", "status", "logs", "check"])
+    start.add_argument("action", nargs="?", default="run", choices=["run", "prepare", "install", "start", "restart", "stop", "status", "logs", "check", "token"])
     start.add_argument("--no-deps", action="store_true", help="skip Python dependency installation")
     update = sub.add_parser("update", help="update now or install/disable the update timer")
     update.add_argument("action", nargs="?", default="run", choices=["run", "install", "disable", "status", "logs"])
@@ -632,6 +641,8 @@ def main(argv=None):
             config = load_config(python)
             for spec in specs(config, python):
                 info(f"{spec['name']}: planned" + (f" on {spec['port']}" if "port" in spec else ""))
+        elif args.action == "token":
+            print(observer_token(load_config(python_bin()), ROOT))
         elif args.action == "logs":
             run([executable("journalctl"), "-u", service_name(), "-f", "-n", "100"])
         else:

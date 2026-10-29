@@ -18,6 +18,7 @@ from .storage import StateStore
 from .memory import InMemoryAdapter, MemoryAdapter, should_store
 from .prompt_builder import build_runtime_prompt
 from .llm import ExistingProviderLLM
+from .observability import build_activity
 
 
 class CognitiveCore:
@@ -63,18 +64,21 @@ class CognitiveCore:
             if normalized not in history:
                 history.append(normalized)
         history = history[-int(self.config.get("conversation_window", 12)) * 2:]
-        app = appraisal(event, self.goals); delta = emotion_delta(event, app)
+        goals_for_turn = json.loads(json.dumps(self.goals))
+        app = appraisal(event, goals_for_turn); delta = emotion_delta(event, app)
         for key, value in delta.items(): setattr(self.self_model.emotion, key, getattr(self.self_model.emotion, key) + value)
         self.self_model.emotion.clamp()
         meaning_result = meaning(event, app)
-        actions = plan(event, self.self_model, self.goals)
+        actions = plan(event, self.self_model, goals_for_turn)
         trace_id = str(event.metadata.get("trace_id") or event.event_id)
+        decision = None
+        llm_used = False
         if self.llm is not None and self.config.get("llm_enabled", False) and (event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")):
             try:
                 prompt = build_runtime_prompt(
                     self.self_model.to_dict(),
                     self.self_model.emotion.to_dict(),
-                    self.goals,
+                    goals_for_turn,
                     [m.text for m in memories],
                     event.to_dict(),
                     self.config.get("available_tools", []),
@@ -94,6 +98,7 @@ class CognitiveCore:
                 }
                 decision = await llm.decide(prompt, context, trace_id)
                 actions = self._actions_from_decision(decision, event)
+                llm_used = True
                 logger.info(f"llm decision generated trace_id={trace_id} intent={decision.get('intent', '')}")
             except Exception as exc:
                 # The deterministic planner remains the only fallback.  The
@@ -140,6 +145,13 @@ class CognitiveCore:
                 str(event.content.get("text", "")),
                 assistant_text,
             )
+        if (event.source in {"qq", "esp32", "sms", "email"} and event.content.get("text")) or event.metadata.get("followup_reply"):
+            manager = getattr(self.memory, "manager", None)
+            backend = getattr(manager, "backend_name", "adapter")
+            try:
+                self.store.save_memory_activity(build_activity(event, memories, meaning_result, goals_for_turn, actions, decision, llm_used, backend))
+            except Exception:
+                logger.warning(f"memory observer capture failed event_id={event.event_id}")
         self.last_tick = {"event": event.to_dict(), "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories]}
         return {"event_id": event.event_id, "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories], "actions": [a.to_dict() for a in actions]}
 

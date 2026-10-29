@@ -79,15 +79,18 @@ qq_official:
   # C2C private-message intent.
   intents: 33554432
 
-# Optional MMTR memory backend (Node >=22.13, no npm install).
-# Enable in data/.config.yaml with memory_backend: mmtr.
-# This explicit selection takes precedence over tencent_memory_enabled.
+# MMTR is the preferred backend. Old Tencent settings are retained but suspended.
+memory_backend: mmtr
+tencent_memory_enabled: false
 mmtr:
+  preferred: true
   node: node
   database: data/memory/mmtr.db
   timeout: 10
   context_budget: 1200
   session_gap_seconds: 1800
+  # Empty: use MMTR_WEB_TOKEN, Cognitive API token, or a generated private key.
+  web_token: ""
 
 # Optional isolated Cognitive Core. Disabled preserves the legacy pipeline.
 cognitive_core:
