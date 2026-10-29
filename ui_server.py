@@ -16,7 +16,7 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
         return
 
     def _proxy_api(self):
-        if not self.path.startswith(("/api/sim-qq/", "/api/memory/", "/api/knowledge/", "/api/dsh/")):
+        if not self.path.startswith(("/api/sim-qq/", "/api/memory/", "/api/knowledge/", "/api/dsh/", "/api/private/")):
             return False
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else None
