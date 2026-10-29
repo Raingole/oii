@@ -164,7 +164,8 @@ class CognitiveCore:
                 "session_id": event.session_id, "user_id": event.metadata.get("user_id", event.actor_id),
                 "team_id": event.metadata.get("team_id", self.config.get("team_id", "personal")),
                 "agent_id": self.agent_id, "provenance": {"event_id": event.event_id, "source": event.source},
-                "memory_observation": (decision or {}).get('memory_observation', {}) if llm_used else {},
+                "memory_observation": ({**(decision or {}).get('memory_observation', {}),
+                    "visual_context": event.content.get('visual_context', [])} if llm_used else {}),
                 "assistant_text": '\n'.join(str(action.payload.get('text', '')) for action in actions if action.type in {'send_message', 'speak'}) if llm_used else '',
             }
             await self.memory.store(meaning_result["event_summary"], scope)
@@ -270,6 +271,19 @@ class CognitiveCore:
                     channel='esp32' if voice else str(event.metadata.get('reply_channel') or 'qq'),
                     target=event.actor_id if voice else self._reply_target(event),
                     risk_level=risk, reason=reason, requires_controller_approval=requires_approval))
+            image_reply=decision.get('image_reply') or {}
+            image_query=str(image_reply.get('query','') or '').strip()
+            if (image_query and event.source=='qq' and event.metadata.get('platform')=='napcat'
+                    and event.session_id.startswith('qq:private:')
+                    and 'qq_send_relevant_image' in {self._tool_name(item) for item in self.config.get('available_tools',[]) or []}):
+                actions.append(Action.create('call_mcp',
+                    {'tool':'qq_send_relevant_image','arguments':{'query':image_query,
+                     'caption':str(image_reply.get('caption','') or '')[:240]},
+                     'session_id':event.session_id,'reply_target':self._reply_target(event),
+                     'reply_channel':event.metadata.get('reply_channel') or 'qq','platform':'napcat',
+                     'silent_followup':True},
+                    target=self._reply_target(event),channel=str(event.metadata.get('reply_channel') or 'qq'),
+                    risk_level='low',reason='按当前对话情绪匹配本地图片',requires_controller_approval=False))
             return actions
         if intent == "schedule":
             arguments = decision.get("arguments", {})

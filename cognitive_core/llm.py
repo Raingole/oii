@@ -47,6 +47,9 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
     tool = value.get("tool", "")
     if tool is None:
         tool = ""
+    image_reply=value.get('image_reply',{})
+    if not isinstance(image_reply,dict):
+        image_reply={}
     return {
         "intent": intent,
         "message": str(message),
@@ -62,6 +65,8 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
         "risk_level": risk,
         "reason": str(value.get("reason", "") or ""),
         "goal_id": str(value.get("goal_id", "") or ""),
+        "image_reply": {'query':str(image_reply.get('query','') or '')[:240],
+                        'caption':str(image_reply.get('caption','') or '')[:240]},
     }
 
 

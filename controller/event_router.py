@@ -66,7 +66,7 @@ class EventRouter:
                     "platform": event.metadata.get("platform", event.source),
                     "source_message_id": payload.get("source_message_id") or event.source_event_id,
                     "conversation_history": event.metadata.get("conversation_history", []),
-                    "followup_reply": action.get("type") == "call_mcp" and action_result.success,
+                    "followup_reply": action.get("type") == "call_mcp" and action_result.success and not payload.get('silent_followup'),
                     "proactive_parent": bool(event.metadata.get('proactive_thought')),
                 },
             )

@@ -45,9 +45,18 @@ def clean_observation(value):
     if not isinstance(value, dict):
         return {}
     result = {}
-    for key, limit in [('fact', 1200), ('gist', 240), ('affect', 120), ('affect_evidence', 160)]:
+    for key, limit in [('fact', 1200), ('gist', 240), ('affect', 120), ('affect_evidence', 160), ('affect_visual_evidence', 240)]:
         if isinstance(value.get(key), str):
             result[key] = value[key].strip()[:limit]
+    try:
+        confidence=float(value.get('affect_confidence',0))
+        result['affect_confidence']=max(0,min(1,confidence)) if confidence==confidence else 0
+    except (TypeError,ValueError):
+        result['affect_confidence']=0
+    visual=value.get('visual_context',[])
+    if isinstance(visual,list):
+        result['visual_context']=[{key:item.get(key) for key in ('description','visible_text','intent','expressed_emotions') if key in item}
+            for item in visual[:3] if isinstance(item,dict)]
     for key in ('entities', 'themes'):
         raw = value.get(key, [])
         if isinstance(raw, list):
@@ -63,14 +72,26 @@ def encode_turn(user_text, assistant_text='', observation=None):
     if not value.get('gist') and re.search(r'(少.{0,4}(符号|标点)|句子.{0,4}短)', user_text):
         gist = '用户偏好少符号、简短的表达'
     label, quote = explicit_affect(user_text)
-    # Model affect must carry an exact quote and a recognizable emotional
-    # self-report. Otherwise use the conservative literal extraction only.
+    # Prefer a model's contextual impression when its evidence is grounded in
+    # the exact user text or in the separately recognized image description.
     evidence = value.get('affect_evidence', '')
-    if evidence and evidence in user_text:
-        evidence_label, _ = explicit_affect(evidence)
-        if evidence_label and label == evidence_label:
-            quote = evidence
-    affect = f'用户感到{label}（原话：{quote}）' if label else ''
+    visual_evidence=value.get('affect_visual_evidence','')
+    visual_text=[]
+    for image in value.get('visual_context',[]):
+        visual_text.extend(str(image.get(key,'')) for key in ('description','visible_text','intent'))
+        for emotion in image.get('expressed_emotions',[]) if isinstance(image.get('expressed_emotions'),list) else []:
+            if isinstance(emotion,dict):
+                visual_text.extend(str(emotion.get(key,'')) for key in ('label','evidence'))
+    text_grounded=bool(evidence and evidence in user_text)
+    image_grounded=bool(visual_evidence and any(visual_evidence in source for source in visual_text))
+    model_affect=value.get('affect','').strip()
+    if model_affect and value.get('affect_confidence',0)>=0.55 and (text_grounded or image_grounded):
+        sources=[]
+        if text_grounded: sources.append('文字：'+evidence)
+        if image_grounded: sources.append('图片：'+visual_evidence)
+        affect=f'本轮交流呈现{model_affect}（'+'；'.join(sources)+'）'
+    else:
+        affect = f'本轮交流呈现{label}（文字：{quote}）' if label else ''
     return {
         'fact': value.get('fact') or fallback_fact, 'gist': gist, 'affect': affect,
         'entities': [item for item in value.get('entities', []) if item in user_text],
