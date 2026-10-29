@@ -151,7 +151,7 @@ class DSHService:
                 requests.append(item)
         return {'runtime_available':bool(self.binary_path()),'enabled':self.enabled,
             'base_url_inherited':bool(os.environ.get('DEEPSEEK_BASE_URL')),
-            'api_key_inherited':bool(os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('LLM_API_KEY')),
+            'api_key_available':bool(self._deepseek_api_key()),
             'reserved_env_files':self.reserved_environment_files(), 'requests':requests}
 
     def reserved_environment_files(self):
@@ -332,12 +332,22 @@ class DSHService:
             'SSL_CERT_FILE','SSL_CERT_DIR','NPM_CONFIG_PREFIX','NPM_CONFIG_CACHE','SYSTEMROOT','WINDIR'}
         env={key:value for key,value in os.environ.items() if key in allowed}
         if include_api_key:
-            api_key=os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('LLM_API_KEY')
+            api_key=self._deepseek_api_key()
             if api_key:
                 env['DEEPSEEK_API_KEY']=api_key
         if dsh_home:
             env['DSH_HOME']=str(dsh_home)
         return env
+
+    def _deepseek_api_key(self):
+        api_key=os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('LLM_API_KEY')
+        if api_key:
+            return api_key
+        selected=(self.config.get('selected_module') or {}).get('LLM')
+        if selected!='DeepSeekLLM':
+            return ''
+        provider=(self.config.get('LLM') or {}).get('DeepSeekLLM') or {}
+        return str(provider.get('api_key') or '').strip()
 
     @staticmethod
     async def _read_capped(stream, maximum):

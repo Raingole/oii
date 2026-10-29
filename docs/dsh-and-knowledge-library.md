@@ -8,9 +8,9 @@
 
 在中控首页、知识花园或记忆观察台顶部打开 **DSH 交互台**（`/dsh-monitor.html`），用同一把只读观察密钥连接。页面只显示真实写入知识库的 DSH 请求：OII 任务输入、确认和进程时间线、脱敏后的 DSH stdout/stderr、退出状态和结果消息的 QQ 投递回执。运行时、环境配置阻塞和空记录状态分开显示；历史请求若没有保存完整输入，会明确标注，不会补造记录。页面每 15 秒刷新，也可手动刷新或筛选状态。
 
-首次在 QQ 对主人说“安装 DSH 运行时”，确认安装请求后才会通过 npm 安装官方 `@deepseek-ai/dsh`。之后可提出单独的 DSH API 配置任务。若 OII 与 DSH 共用 DeepSeek API Key，将 `DEEPSEEK_API_KEY` 放在 `.dsh-launch.env`；它由 systemd 传给 OII，并由控制器仅在启动经确认的 DSH 任务时传给 DSH 子进程。控制器不会把 YAML 里的聊天密钥注入 DSH 子进程，也不会把密钥交给 npm 安装进程。
+首次在 QQ 对主人说“安装 DSH 运行时”，确认安装请求后才会通过 npm 安装官方 `@deepseek-ai/dsh`。之后可提出单独的 DSH API 配置任务。DSH 运行获批任务时，会复用 OII 当前选中的 DeepSeek 提供方 API Key（也接受 `DEEPSEEK_API_KEY` 或 `LLM_API_KEY` 环境变量），仅传给该 DSH 子进程；不会传给 npm 安装进程，也不会写入日志或观察页面。
 
-`DEEPSEEK_BASE_URL` 是 DSH 启动级设置，不能放在项目 `.env` 或 DSH home `.env`。systemd 单元读取项目根目录可选的 `.dsh-launch.env`，OII 和 DSH 都从同一启动环境读取 `DEEPSEEK_BASE_URL` 与 `DEEPSEEK_API_KEY`；DSH 子进程只接收运行任务所需的 API Key，安装 npm 包时不会传入 API Key。若交互台报告 `.env` 中发现该设置，把 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_API_KEY` 的原值移到 `.dsh-launch.env`，并从 `.env` 删除这两行；随后运行 `sudo bash auto-start.sh install` 重新生成并重启 systemd 服务。该文件已加入 Git 忽略列表。不要把访问密钥写到网页或聊天日志中。
+`DEEPSEEK_BASE_URL` 是 DSH 启动级设置，不能放在项目 `.env` 或 DSH home `.env`。systemd 单元读取项目根目录可选的 `.dsh-launch.env`，OII 与 DSH 都会从启动环境读取该地址。若交互台报告 `.env` 中发现该设置，只需把 `DEEPSEEK_BASE_URL` 的原值移到 `.dsh-launch.env`，并从 `.env` 删除该行；API Key 可继续留在当前 DeepSeek 提供方的 YAML 配置中。保存后运行 `sudo bash auto-start.sh install` 重新生成并重启 systemd 服务。该文件已加入 Git 忽略列表。不要把访问密钥写到网页或聊天日志中。
 
 每日主动思考只在配置的随机时间窗口内尝试一次，默认上海时间 09:00–22:00；会从近期对话和已学的 B 站资料取线索。主动思考若建议 DSH 操作，仍必须经过同一套 QQ 单次确认。
 
