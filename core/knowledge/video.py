@@ -61,7 +61,7 @@ class VideoService:
             tool('bilibili_watch_video','后台看B站视频并生成分镜图。默认看前5分钟，可指定起止秒数，最多10分钟；当前QQ私聊完成后发图。返回job_id，不能把queued说成看完。',
                 {**video,'from_seconds':{'type':'number','minimum':0},'to_seconds':{'type':'number','minimum':0},'cells':{'type':'integer','enum':[9,16]}},['video']),
             tool('bilibili_video_screenshot','从B站视频指定秒数抽取单帧截图，后台生成PNG并发回当前QQ私聊。Linux无桌面也可用。',
-                {**video,'at_seconds':{'type':'number','minimum':0,'maximum':1799}},['video','at_seconds']),
+                {**video,'at_seconds':{'type':'number','minimum':0,'maximum':1799},'caption':{'type':'string','description':'可选短配文'}},['video','at_seconds']),
             tool('video_job_status','查询当前会话的视频任务，完成后返回画面笔记、编号时间和可发图的artifact_id。',{'job_id':{'type':'string'}},['job_id']),
             tool('qq_send_image','向当前NapCat QQ私聊发送图片。提供当前会话artifact_id或公开https图片url，二选一。必须以工具送达结果为准。',
                 {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}}),
@@ -143,7 +143,7 @@ class VideoService:
                 raise ValueError('video_screenshot_time_invalid')
             request={'operation':'screenshot','video':video_id(arguments.get('video','')),
                 'at_seconds':at,'route':self.route(context),
-                'caption':f"这是 B 站视频在 {at:.1f} 秒处的截图。"}
+                'caption':str(arguments.get('caption') or f"这是 B 站视频在 {at:.1f} 秒处的截图。")[:500]}
             seed=(context.get('action') or {}).get('action_id')
             ident=hashlib.sha256(f"{scope}:{seed}".encode()).hexdigest()[:32] if seed else uuid.uuid4().hex
             with self.store.connect() as db:
