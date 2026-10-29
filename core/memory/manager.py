@@ -23,6 +23,7 @@ from typing import Any
 from config.config_loader import get_project_dir
 from config.logger import setup_logging
 from config.memory_policy import selected_memory_backend
+from core.utils.current_time import local_now
 
 from .vault import SecretVault
 from .identity import IdentityResolver
@@ -279,7 +280,7 @@ class MemoryManager:
         return "general"
 
     def _time_period(self) -> str:
-        hour = datetime.now().hour
+        hour = local_now().hour
         if hour >= 22 or hour < 6:
             return "night"
         if 11 <= hour < 14:

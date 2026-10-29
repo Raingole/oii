@@ -3,6 +3,8 @@ import re
 from typing import List, Dict
 from datetime import datetime
 
+from .current_time import format_current_time
+
 
 class Message:
     def __init__(
@@ -112,9 +114,9 @@ class Dialogue:
         if system_message:
             full_prompt = system_message.content
 
-            # 替换时间占位符
+            # 替换时间占位符，附带时段与 24 小时制标记
             full_prompt = full_prompt.replace(
-                "{{current_time}}", datetime.now().strftime("%H:%M")
+                "{{current_time}}", format_current_time()
             )
 
             # 填充记忆

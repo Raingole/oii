@@ -26,3 +26,13 @@ data/knowledge/
 deploy/bilibili/node_modules/
 
 data/video/
+
+# 敏感/临时文件
+.env
+.env.*
+.env~
+.env.bak*
+=
+*.lock
+data/state.json
+data/state.json.lock

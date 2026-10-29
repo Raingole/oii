@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..contracts import CognitiveEvent
 from ..runtime import logger
+from core.utils.current_time import format_current_time
 
 
 class ProactiveThinking:
@@ -169,7 +170,7 @@ class ProactiveThinking:
             except Exception:
                 pass
         event = CognitiveEvent.create('system', 'proactive_thought', 'self', 'self',
-            {'text': f'本地时间 {local:%Y-%m-%d %H:%M}。本轮随机思考角度（只作启发，不是指定话题）：{clue}。请结合最近对话、真实记忆、当前情景和交流语气，自行生成一个有上下文的新想法；也可以判断没有自然话题并保持安静。{meme_context}'},
+            {'text': f'本地时间 {local:%Y-%m-%d} {format_current_time(local)}。本轮随机思考角度（只作启发，不是指定话题）：{clue}。请结合最近对话、真实记忆、当前情景和交流语气，自行生成一个有上下文的新想法；也可以判断没有自然话题并保持安静。{meme_context}'},
             session_id=session, metadata={'proactive_thought': True, 'topic': topic,
                 'local_time': local.isoformat(), 'platform': 'napcat', 'reply_channel': 'qq',
                 'reply_target': contact['target'], 'user_id': contact['actor_id']})
