@@ -20,6 +20,7 @@ from .memory import InMemoryAdapter, MemoryAdapter, should_store
 from .prompt_builder import build_runtime_prompt
 from .llm import ExistingProviderLLM, validate_decision, LLMDecisionError
 from .observability import build_activity
+from .reply_parts import split_reply_parts
 
 
 class CognitiveCore:
@@ -229,43 +230,23 @@ class CognitiveCore:
             # sequencing limits. Preserve all text in one transport message.
             if event.source == 'esp32' or event.metadata.get('platform') == 'official':
                 parts = ['\n'.join(parts)]
-            if len(parts) > 1:
-                actions = []
-                for index, message in enumerate(parts[:4]):
-                    single = {**decision, 'messages': [], 'message': message}
-                    for action in self._actions_from_decision(single, event):
-                        action.payload.update(reply_part=index + 1, reply_total=len(parts[:4]))
-                        actions.append(action)
-                return actions
-            if parts:
-                decision = {**decision, 'message': parts[0]}
-            message = str(decision.get("message", "") or "").strip()
-            if not message:
+            else:
+                parts = split_reply_parts(parts)
+            if not parts or not any(part.strip() for part in parts):
                 return [Action.create("do_nothing", reason="LLM reply missing message")]
-            if event.source == "esp32":
-                return [Action.create(
-                    "speak",
-                    {"text": message},
-                    channel="esp32",
-                    target=event.actor_id,
-                    risk_level=risk,
-                    reason=reason,
-                    requires_controller_approval=requires_approval,
-                )]
-            payload = {
-                "text": message,
-                "platform": event.metadata.get("platform", event.source),
-                "source_message_id": event.metadata.get("source_message_id", event.source_event_id),
-            }
-            return [Action.create(
-                "send_message",
-                payload,
-                channel=str(event.metadata.get("reply_channel") or "qq"),
-                target=self._reply_target(event),
-                risk_level=risk,
-                reason=reason,
-                requires_controller_approval=requires_approval,
-            )]
+            actions = []
+            for index, message in enumerate(parts):
+                voice = event.source == 'esp32'
+                payload = {'text': message} if voice else {
+                    'text': message, 'platform': event.metadata.get('platform', event.source),
+                    'source_message_id': event.metadata.get('source_message_id', event.source_event_id)}
+                if len(parts) > 1:
+                    payload.update(reply_part=index + 1, reply_total=len(parts))
+                actions.append(Action.create('speak' if voice else 'send_message', payload,
+                    channel='esp32' if voice else str(event.metadata.get('reply_channel') or 'qq'),
+                    target=event.actor_id if voice else self._reply_target(event),
+                    risk_level=risk, reason=reason, requires_controller_approval=requires_approval))
+            return actions
         if intent == "schedule":
             arguments = decision.get("arguments", {})
             if not isinstance(arguments, dict):
