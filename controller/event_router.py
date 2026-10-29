@@ -22,6 +22,23 @@ class EventRouter:
         self.core, self.dispatcher = core, dispatcher
         self._session_locks: dict[str, asyncio.Lock] = {}
 
+    @staticmethod
+    def _dsh_approval_message(prepared: dict[str, Any]) -> str:
+        if prepared.get('status')!='approval_required' or not prepared.get('approval_code'):
+            return 'DSH 没有建立有效的待确认请求，因此没有运行任务。'
+        operation='开始安装' if prepared.get('operation')=='install_runtime' else '执行'
+        return (f"DSH 请求已建立，尚未运行。\n任务：{prepared.get('display_task') or prepared.get('task') or '（无任务说明）'}\n"
+            f"理由：{prepared.get('rationale') or '主人提出的请求'}\n回复“同意 {prepared['approval_code']}”{operation}，"
+            f"或回复“拒绝 {prepared['approval_code']}”取消。确认码 10 分钟内有效。")
+
+    @staticmethod
+    def _dsh_preparation_result(action_result) -> dict[str, Any]:
+        envelope=action_result.result if isinstance(action_result.result,dict) else {}
+        prepared=envelope.get('result') if isinstance(envelope.get('result'),dict) else {}
+        if not action_result.success or not envelope.get('success'):
+            return {'status':'failed'}
+        return prepared
+
     def session_busy(self, session_id: str) -> bool:
         lock = self._session_locks.get(session_id)
         return bool(lock and lock.locked())
@@ -46,6 +63,23 @@ class EventRouter:
                 return {'event_id':event.event_id,'actions':[action.to_dict()],
                     'dispatched':[result.to_dict()],'dsh_confirmation':confirmation['status']}
         install_request=str(event.content.get('text') or '').strip()
+        affirmative = re.fullmatch(r'(?:同意|可以|好|行|嗯|继续|去吧|开始|ok|okay|yes)[。.!！ ]*', install_request, re.I)
+        if (dsh is not None and affirmative and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')):
+            pending=dsh.pending_request({'session_id':event.session_id,'actor_id':event.actor_id,
+                'action':{'target':event.actor_id,'payload':{}}})
+            if pending:
+                reply=(f"这项任务已有真实待确认请求：\n任务：{pending['task']}\n"
+                    f"请回复“同意 {pending['approval_code']}”执行，或回复“拒绝 {pending['approval_code']}”取消。"
+                    "单独回复“同意”不会启动 DSH。")
+                action=Action.create('send_message',{'session_id':event.session_id,'text':reply,'platform':'napcat'},
+                    channel=str(event.metadata.get('reply_channel') or 'qq'),
+                    target=str(event.metadata.get('reply_target') or event.actor_id))
+                delivery=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+                logger.info(f'dsh pending approval code resent event_id={event.event_id} delivered={delivery.success}')
+                return {'event_id':event.event_id,'actions':[action.to_dict()],
+                    'dispatched':[delivery.to_dict()],'dsh_pending_request':'approval_code_resent'}
         if (dsh is not None and event.source=='qq' and event.type=='message'
                 and event.metadata.get('platform','napcat')=='napcat'
                 and str(event.session_id or '').startswith('qq:private:')
@@ -134,6 +168,46 @@ class EventRouter:
             logger.info(f'dsh connectivity request handled event_id={event.event_id} status={status} delivered={delivery.success}')
             return {'event_id':event.event_id,'actions':[action.to_dict()],
                 'dispatched':[delivery.to_dict()],'dsh_connectivity_request':status}
+        dsh_question=bool(re.search(r'(?:为什么|怎么|如何|是什么|能不能|能否|可不可以|是否|吗[?？。！!]*$)',install_request))
+        dsh_direct_command=bool(
+            re.search(r'(?:用|通过|调用|使用|让|叫).{0,16}dsh',install_request,re.I)
+            or re.search(r'dsh.{0,24}(?:帮我|来|执行|运行|安装|配置|检查|测试|查看|搜索|编写|修改|创建|分析|整理|抓取|下载|生成)',install_request,re.I)
+        )
+        if (dsh is not None and dsh_direct_command and not dsh_question
+                and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')):
+            status='approval_required'
+            if not dsh.enabled:
+                prepared={'status':'disabled'}
+                reply='DSH 接入目前处于关闭状态，没有创建或运行任务。'
+                status='disabled'
+            elif not dsh.binary_path():
+                reply='DSH 命令行工具尚未安装，没有创建或运行任务。请先单独请求安装 DSH 运行时。'
+                status='runtime_missing'
+            else:
+                try:
+                    prepared=await dsh.execute('dsh_prepare',{
+                        'operation':'run','task':install_request[:12000],
+                        'rationale':'主人在 QQ 私聊中明确要求通过 DSH 执行这项任务。'},
+                        {'session_id':event.session_id,'actor_id':event.actor_id,
+                         'action':{'target':event.actor_id,'payload':{}}})
+                    reply=self._dsh_approval_message(prepared)
+                    status=str(prepared.get('status') or 'unavailable')
+                except PermissionError:
+                    reply='DSH 请求仅接受已绑定主人的 QQ 私聊；没有运行任务。'
+                    status='owner_only'
+                except Exception as exc:
+                    logger.warning(f'dsh direct request preparation failed event_id={event.event_id} error_type={type(exc).__name__}')
+                    reply='暂时无法建立 DSH 确认请求；没有运行任务，请稍后再试。'
+                    status='failed'
+            action=Action.create('send_message',{'session_id':event.session_id,'text':reply,'platform':'napcat'},
+                channel=str(event.metadata.get('reply_channel') or 'qq'),
+                target=str(event.metadata.get('reply_target') or event.actor_id))
+            delivery=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+            logger.info(f'dsh direct request handled event_id={event.event_id} status={status} delivered={delivery.success}')
+            return {'event_id':event.event_id,'actions':[action.to_dict()],
+                'dispatched':[delivery.to_dict()],'dsh_direct_request':status}
         # A short affirmative can accept the *proposal to prepare a request*, but
         # it must never authorize execution. Create the normal one-time code so
         # the owner can review the exact, bounded task before anything runs.
@@ -151,8 +225,8 @@ class EventRouter:
                             history.append(normalized)
             previous=next((item.get('content','') for item in reversed(history)
                            if item.get('role')=='assistant' and item.get('content')), '')
-            waiting = bool(re.search(r'dsh_prepare|\bDSH\b', previous, re.I)
-                           and re.search(r'(?:等|需要|得|先).{0,12}(?:你)?(?:点头|同意|确认|批准)|请你(?:点头|同意|确认|批准)', previous))
+            waiting = bool(re.search(r'dsh', previous, re.I)
+                           and re.search(r'(?:等你|需要你|请你|让你|你来|点头|同意|确认|批准|回复|我现在就准备|准备.{0,12}(?:请求|操作|调用))', previous))
             if waiting:
                 if not dsh.enabled:
                     reply='DSH 接入目前处于关闭状态，没有创建请求。'
@@ -163,8 +237,8 @@ class EventRouter:
                 else:
                     try:
                         proposal=re.sub(r'\s+', ' ', previous).strip()[:400]
-                        task=('只读检查并解释助手刚才提出的内容；仅做分析，不修改文件、安装软件或更改配置。'
-                              '\n提议原文：'+proposal)
+                        task=('执行上一条助手明确提出、现由主人表示可以继续准备的 DSH 任务；严格限于该提议的目标。'
+                              '此请求仍需主人收到本次真实确认码后再次批准，当前不能运行。\n提议原文：'+proposal)
                         prepared=await dsh.execute('dsh_prepare',{
                             'operation':'run','task':task,
                             'rationale':'你刚才同意我为上一条明确提出的 DSH 建立待确认请求；这条“可以”不作为执行授权。'},
@@ -199,7 +273,7 @@ class EventRouter:
         logger.info(f"action planned event_id={event.event_id} count={len(actions)}")
         dispatched = []
         feedback = []
-        for action in actions:
+        for action in list(actions):
             if action.get('payload', {}).get('reply_part', 1) > 1:
                 await self.pause_between_replies()
             logger.info(f"action dispatched event_id={event.event_id} action_id={action.get('action_id')} type={action.get('type')}")
@@ -207,6 +281,22 @@ class EventRouter:
             logger.info(f"action result event_id={event.event_id} action_id={action_result.action_id} status={action_result.status} success={action_result.success}")
             dispatched.append(action_result.to_dict())
             payload = action.get("payload", {}) if isinstance(action.get("payload", {}), dict) else {}
+            dsh_prepare_tool=(action.get('type')=='call_mcp' and payload.get('tool')=='dsh_prepare')
+            if dsh_prepare_tool:
+                prepared=self._dsh_preparation_result(action_result)
+                message=self._dsh_approval_message(prepared)
+                if prepared.get('status')!='approval_required':
+                    message='没能建立有效的 DSH 待确认请求，因此没有运行任务。请在 DSH 交互台查看工具调用结果。'
+                reply_action=Action.create('send_message',{'session_id':event.session_id,'text':message,
+                    'platform':event.metadata.get('platform','napcat'),
+                    'source_message_id':event.metadata.get('source_message_id',event.source_event_id)},
+                    channel=str(event.metadata.get('reply_channel') or 'qq'),
+                    target=str(event.metadata.get('reply_target') or event.actor_id),
+                    reason='确定性展示 dsh_prepare 返回的真实确认码')
+                actions.append(reply_action.to_dict())
+                reply_result=await self.dispatcher.dispatch(event.event_id,reply_action.to_dict())
+                logger.info(f"dsh preparation response handled event_id={event.event_id} status={prepared.get('status','failed')} delivered={reply_result.success}")
+                dispatched.append(reply_result.to_dict())
             result_event = self.build(
                 "controller",
                 "action_result",
@@ -228,7 +318,7 @@ class EventRouter:
                     "platform": event.metadata.get("platform", event.source),
                     "source_message_id": payload.get("source_message_id") or event.source_event_id,
                     "conversation_history": event.metadata.get("conversation_history", []),
-                    "followup_reply": action.get("type") == "call_mcp" and action_result.success and not payload.get('silent_followup'),
+                    "followup_reply": action.get("type") == "call_mcp" and action_result.success and not payload.get('silent_followup') and not dsh_prepare_tool,
                     "proactive_parent": bool(event.metadata.get('proactive_thought')),
                 },
             )

@@ -134,6 +134,26 @@ class DSHService:
             'expires_at':now+ttl,
             'instruction':'只展示已批准任务摘要和一次性确认码；在收到该码的明确同意前，不运行 DSH、不安装包、不修改配置。'}
 
+    def pending_request(self, context):
+        """Return the current owner's real pending request, never a model-invented code."""
+        resolved=self._scope_allowed(context)
+        if not resolved:
+            return None
+        scope,_actor=resolved
+        now=self.clock()
+        with self.store.connect() as db:
+            rows=db.execute("SELECT id,code,operation,task,rationale,expires FROM dsh_requests WHERE scope=? AND status='pending' ORDER BY created DESC",(scope,)).fetchall()
+            for row in rows:
+                if row['expires']<=now:
+                    db.execute("UPDATE dsh_requests SET status='expired',finished=? WHERE id=? AND status='pending'",(now,row['id']))
+                    db.execute('INSERT INTO dsh_request_events(request_id,stage,detail,created) VALUES(?,?,?,?)',
+                        (row['id'],'expired','确认码已过期；没有运行 DSH。',now))
+                    continue
+                return {'request_id':row['id'],'approval_code':'DSH-'+row['code'],
+                    'operation':row['operation'],'task':self._redact(row['task']),
+                    'rationale':self._redact(row['rationale']),'expires_at':row['expires']}
+        return None
+
     def observer_snapshot(self, scope, limit=50):
         limit=max(1,min(100,int(limit)))
         with self.store.connect() as db:
