@@ -60,6 +60,14 @@ def register_observer(app, core_provider, config, *, root=None):
         if not scope:
             return web.json_response({"ok":True,"scope":"","counts":{"sources":0,"meme_entries":0,"video_notes":0,"images":0},"sources":[],"images":[]},headers={"Cache-Control":"no-store"})
         result=await asyncio.to_thread(learning.store.library,scope,200)
+        last=learning.store.state('last_run')
+        schedule=learning.store.state('meme_schedule')
+        result['learning_status']={
+            'last_run': last if last.get('scope')==scope else {},
+            'meme_schedule': {key:schedule.get(key) for key in ('day','count','next_at') if key in schedule},
+            'enabled': bool(learning.settings.get('enabled',False)),
+            'meme_enabled': bool(learning.meme_settings.get('enabled',False)),
+        }
         result['ok']=True
         return web.json_response(result,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
 

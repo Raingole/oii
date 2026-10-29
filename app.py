@@ -120,10 +120,12 @@ async def main():
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     if ws_server.action_dispatcher is not None:
         class _DynamicProvider:
-            def __init__(self, getter, conn_getter=lambda: None): self.getter, self.conn_getter = getter, conn_getter
+            def __init__(self, getter, conn_getter=lambda: None, direct=False): self.getter, self.conn_getter, self.direct = getter, conn_getter, direct
             async def discover(self):
                 obj = self.getter()
                 if obj is None: return []
+                if self.direct and hasattr(obj, "discover"):
+                    return await obj.discover()
                 if hasattr(obj, "get_tools"): return obj.get_tools()
                 if hasattr(obj, "get_all_tools"): return obj.get_all_tools()
                 if hasattr(obj, "get_available_tools"): return obj.get_available_tools()
@@ -131,6 +133,8 @@ async def main():
             async def execute(self, name, arguments, context):
                 obj = self.getter()
                 if obj is None: raise RuntimeError("tool provider offline")
+                if self.direct:
+                    return await obj.execute(name, arguments, context)
                 if hasattr(obj, "execute"):
                     return await obj.execute(self.conn_getter(), name, arguments)
                 if hasattr(obj, "execute_tool"): return await obj.execute_tool(name, arguments)
@@ -143,7 +147,7 @@ async def main():
         catalog.register("desktop", _DynamicProvider(lambda: getattr(ws_server, "desktop_control", None)))
         catalog.register("servo", servo_server)
         if ws_server.cognitive_runtime and ws_server.cognitive_runtime.learning:
-            catalog.register('learning',ws_server.cognitive_runtime.learning)
+            catalog.register('learning',_DynamicProvider(lambda: ws_server.cognitive_runtime.learning, direct=True))
             ws_server.cognitive_runtime.learning.video.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.learning.dsh.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.core.config.setdefault('available_tools',[]).extend(await ws_server.cognitive_runtime.learning.discover())

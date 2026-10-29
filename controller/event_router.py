@@ -4,6 +4,7 @@ from typing import Any
 import asyncio
 import random
 import re
+import time
 from cognitive_core.contracts import Action, CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
@@ -49,6 +50,44 @@ class EventRouter:
 
     async def _route(self, event: CognitiveEvent) -> dict[str, Any]:
         logger.info(f"cognitive event received event_id={event.event_id} source={event.source} type={event.type}")
+        learning=getattr(self.core,'learning',None)
+        meme_request=str(event.content.get('text') or '').strip()
+        owner_qq=str(((getattr(learning,'config',{}) or {}).get('qq') or {}).get('owner_qq') or '') if learning else ''
+        wants_meme=(re.search(r'(?:去|现在|帮我|让你|自己去|你自己去|你去|给我)?\s*(?:上|去)?\s*(?:B站|哔哩哔哩)?\s*(?:找|搜|学|学习|刷)\s*(?:一下|一个|个|点|些)?\s*(?:B站|哔哩哔哩)?\s*(?:网络)?\s*梗',meme_request,re.I)
+            or re.search(r'(?:去|现在|帮我|让你|自己去|你自己去|你去).{0,8}(?:学|学习|找|搜).{0,8}梗',meme_request,re.I))
+        if (learning is not None and wants_meme and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')
+                and (not owner_qq or str(event.actor_id)==owner_qq)):
+            self.core.store.runtime_set(f'contact:{self.core.agent_id}', {
+                'session_id':event.session_id,'actor_id':event.actor_id,
+                'target':event.metadata.get('reply_target') or event.actor_id,
+                'platform':'napcat','last_input_at':time.time(),'event_id':event.event_id})
+            action=Action.create('call_mcp',{'tool':'meme_learn_now','arguments':{},
+                'session_id':event.session_id,'reply_target':event.metadata.get('reply_target') or event.actor_id,
+                'reply_channel':event.metadata.get('reply_channel') or 'qq','platform':'napcat'},
+                target=str(event.metadata.get('reply_target') or event.actor_id),channel='qq',
+                reason='用户明确要求现在学习一个B站梗')
+            started=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+            envelope=started.result if isinstance(started.result,dict) else {}
+            payload=envelope.get('result') if isinstance(envelope.get('result'),dict) else {}
+            if started.success and payload.get('status')=='started':
+                reply='好，我现在去 B 站找一个有字幕证据的新梗。完成或遇到问题后我会把结果发给你。'
+                status='started'
+            elif started.success and payload.get('status')=='already_running':
+                reply='我已经在处理一个 B 站学习任务了，结束后会把结果发给你。'
+                status='already_running'
+            else:
+                error=str(started.error or payload.get('status') or 'tool_unavailable')
+                reply=f'这次没能启动梗学习（{error}）。我没有记录成已学习。'
+                status='failed'
+            response=Action.create('send_message',{'session_id':event.session_id,'text':reply,'platform':'napcat'},
+                channel='qq',target=str(event.metadata.get('reply_target') or event.actor_id),
+                reason='回复明确的B站梗学习请求')
+            delivered=await self.dispatcher.dispatch(event.event_id,response.to_dict())
+            logger.info(f'bilibili meme request handled event_id={event.event_id} status={status} delivered={delivered.success}')
+            return {'event_id':event.event_id,'actions':[action.to_dict(),response.to_dict()],
+                'dispatched':[started.to_dict(),delivered.to_dict()],'meme_learning_request':status}
         dsh=getattr(getattr(self.core,'learning',None),'dsh',None)
         if (dsh is not None and event.source=='qq' and event.type=='message'
                 and event.metadata.get('platform','napcat')=='napcat'

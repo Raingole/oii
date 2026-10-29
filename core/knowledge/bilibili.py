@@ -82,7 +82,13 @@ class BilibiliClient:
                         known = {'VALIDATION_ERROR','COOKIE_EXPIRED','SUBTITLE_UNAVAILABLE','API_RATE_LIMITED','BILIBILI_API_ERROR','UNKNOWN_ERROR','NETWORK_ERROR','AUTH_REQUIRED','CREDENTIALS_REQUIRED'}
                         raise RuntimeError('bilibili_' + (code if isinstance(code,str) and code in known else 'upstream_error'))
                     return data
-                return await asyncio.wait_for(invoke(), timeout=float(self.config.get('timeout_seconds',20)))
+                if tool == 'get_video_transcript':
+                    timeout = self.config.get('transcript_timeout_seconds', 180)
+                elif tool == 'search_bilibili_videos':
+                    timeout = self.config.get('search_timeout_seconds', 45)
+                else:
+                    timeout = self.config.get('timeout_seconds', 30)
+                return await asyncio.wait_for(invoke(), timeout=max(1.0, float(timeout)))
             except BaseException:
                 await self.close()
                 raise

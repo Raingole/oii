@@ -25,3 +25,5 @@ footer{border-color:var(--line)}dialog{border-radius:15px;box-shadow:0 24px 80px
 @media(max-width:760px){.hero{grid-template-columns:minmax(0,1fr)}.hero-copy,.stats,.stat,.library-head,.search,.search input,.cards,.card{min-width:0}.hero h1,.hero p,.card h3,.card p{overflow-wrap:anywhere}.search input{flex:1}}
 @media(max-width:520px){.hero{width:100%;overflow:hidden}.stats{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.stat{width:100%}.library-head{display:block}.search{width:100%;max-width:100%}.filters{max-width:100%;overflow-x:auto}.cards{width:100%}}
 @media(max-width:520px){.hero{display:block;grid-template-columns:1fr;width:auto;max-width:100%}.hero-copy{display:block;width:100%}.hero h1{max-width:100%;white-space:normal;overflow-wrap:anywhere}.hero p{width:100%;max-width:100%}.stats{display:grid;width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.status-pill{position:static;justify-content:flex-end;margin-top:8px}}
+
+.learning-status{margin-top:7px!important;color:#3677e8!important;font-size:12px!important;line-height:1.6!important}

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f6f7f4">
   <meta name="referrer" content="no-referrer">
   <title>知识花园 · OII</title>
-  <link rel="stylesheet" href="/knowledge.css?v=1">
-  <script src="/knowledge.js?v=1" defer></script>
+  <link rel="stylesheet" href="/knowledge.css?v=2">
+  <script src="/knowledge.js?v=2" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -26,7 +26,7 @@
       <div class="status-pill"><span id="status-dot" class="dot"></span><span id="status">等待连接</span><button id="refresh" title="刷新知识库" aria-label="刷新知识库">↻</button></div>
     </section>
     <section class="library">
-      <div class="library-head"><div><h2>已学到的内容</h2><p id="updated">连接后显示当前 QQ 私聊知识</p></div><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜梗、语境、图片文字…" autocomplete="off"></label></div>
+      <div class="library-head"><div><h2>已学到的内容</h2><p id="updated">连接后显示当前 QQ 私聊知识</p><p id="learning-status" class="learning-status">等待学习任务状态</p></div><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜梗、语境、图片文字…" autocomplete="off"></label></div>
       <div class="filters" role="group" aria-label="知识类型"><button class="filter active" data-filter="all">全部 <span id="filter-all">0</span></button><button class="filter" data-filter="meme">B站梗 <span id="filter-meme">0</span></button><button class="filter" data-filter="video">视频笔记 <span id="filter-video">0</span></button><button class="filter" data-filter="image">图片与表情包 <span id="filter-image">0</span></button></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <div id="cards" class="cards"><div class="empty"><span>✳</span><h3>知识花园还没连接</h3><p>用记忆观察台的访问密钥连接，查看已收录的梗和图片。</p><button id="connect-empty" class="button dark">连接知识库</button></div></div>

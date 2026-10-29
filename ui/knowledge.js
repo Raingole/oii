@@ -51,6 +51,24 @@
     card.append(cover,body);return card;
   }
   function refreshCounts(data){const counts=data.counts||{};$('count-memes').textContent=counts.meme_entries??0;$('count-videos').textContent=counts.video_notes??0;$('count-images').textContent=counts.images??0;$('count-sources').textContent=counts.sources??0;$('filter-meme').textContent=counts.meme_entries??0;$('filter-video').textContent=counts.video_notes??0;$('filter-image').textContent=counts.images??0;$('filter-all').textContent=(counts.meme_entries||0)+(counts.video_notes||0)+(counts.images||0);}
+  function refreshLearning(data){
+    const box=$('learning-status'),info=data.learning_status||{},last=info.last_run||{},schedule=info.meme_schedule||{};
+    if(!info.enabled){box.textContent='B站学习已关闭';return;}
+    const phase={checking_bilibili:'正在检查 B 站登录',searching_bilibili:'正在搜索梗视频',fetching_subtitles:'正在读取视频字幕',extracting_memes:'正在整理字幕里的梗'};
+    const errors={needs_bilibili_login:'B 站尚未登录',no_new_video_candidate:'没有找到新的合适视频',meme_transcript_missing:'视频没有可用字幕',transcript_too_short:'字幕内容太少',meme_extraction_unavailable:'模型未能从字幕中确认梗',bilibili_request_timeout:'B 站请求超时',bilibili_runtime_missing:'B 站组件未安装',bilibili_process_exited:'B 站进程已退出',process_restarted:'服务重启时任务被中断'};
+    let text='';
+    if(last.status==='learning')text=phase[last.phase]||'梗学习进行中';
+    else if(last.status==='learned')text=`最近学习完成 · 收录 ${last.meme_count??0} 条梗`;
+    else if(last.status==='learning_failed')text=`最近一次学习失败 · ${errors[last.error]||last.error||'原因未记录'}`;
+    else if(last.status==='needs_bilibili_login')text='B 站尚未登录，登录后会继续学习';
+    else text=info.meme_enabled?'等待下一次梗学习':'梗学习已关闭';
+    if(last.title)text+=' · '+last.title;
+    if(schedule.next_at&&last.status!=='learning'){
+      const next=new Date(Number(schedule.next_at)*1000);
+      if(Number.isFinite(+next))text+=` · 下次计划 ${new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(next)}`;
+    }
+    box.textContent=text;
+  }
   function visibleCards(){
     const data=state.data;if(!data)return[];const query=state.query.trim().toLocaleLowerCase();const cards=[];
     for(const source of data.sources||[]){
@@ -72,7 +90,7 @@
   async function load(){
     if(!state.key)return;state.busy=true;setStatus('正在读取');
     try{const response=await fetch('/api/knowledge/library',{headers:{Authorization:'Bearer '+state.key},cache:'no-store'});if(response.status===401){state.data=null;setStatus('密钥无效');$('auth-error').textContent='访问密钥不正确或已过期。';openDialog();return;}if(!response.ok)throw new Error('知识库服务暂不可用');
-      state.data=await response.json();refreshCounts(state.data);render();setStatus('已连接',true);notice('');$('updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+      state.data=await response.json();refreshCounts(state.data);refreshLearning(state.data);render();setStatus('已连接',true);notice('');$('updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
     }catch(error){setStatus('连接失败');notice(error.message||'读取知识库失败。');}finally{state.busy=false;}
   }
   function openDialog(){if(!$('auth-dialog').open)$('auth-dialog').showModal();}
