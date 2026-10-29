@@ -142,7 +142,8 @@ class LegacyMemoryPort:
         # record_turn is the existing single write path that persists locally and
         # invokes the configured Tencent Memory commit hook when enabled.
         try:
-            await asyncio.to_thread(self.manager.record_turn, text, "", channel, session, meta.get("tool_result"), meta.get("turn_id", meta.get("event_id"))); self.degraded=False; return True
+            options = {'memory_observation': meta.get('memory_observation')} if getattr(self.manager, 'using_mmtr', False) else {}
+            await asyncio.to_thread(self.manager.record_turn, text, str(meta.get('assistant_text', '')), channel, session, meta.get("tool_result"), meta.get("turn_id", meta.get("event_id")), **options); self.degraded=False; return True
         except Exception as exc: self._failed(exc); return False
     async def update(self, memory_id: str, text: str, metadata: dict[str, Any] | None = None) -> bool:
         backend=getattr(self.manager,"tencent_backend",None)

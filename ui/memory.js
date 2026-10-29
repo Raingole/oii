@@ -52,17 +52,34 @@
     }
     root.append(list);
     if (node.channels?.length) {
-      root.append(element('p', 'channel-title', '通道强度'));
-      for (const channel of node.channels) {
+      root.append(element('p', 'channel-title', '自然保留 · 不含召回增益'));
+      root.append(element('p', 'channel-explanation', '这是记忆保留程度，不是事实可信度或情绪浓度。新记忆从 1 开始，按天衰减；被想起还会获得短期增益。'));
+      if (node.created_at) {
+        const age = Number(node.age_days);
+        const elapsed = age >= 1 ? `${age.toFixed(1)} 天` : age * 24 >= 1 ? `${(age * 24).toFixed(1)} 小时` : `${Math.max(0, Math.floor(age * 1440))} 分钟`;
+        root.append(element('p', 'channel-explanation', `入库 ${formatDate(node.created_at, true)} · 召回时已过 ${elapsed}`));
+      }
+      for (const channel of [...node.channels].sort((a, b) => ['fact', 'gist', 'affect'].indexOf(a.channel) - ['fact', 'gist', 'affect'].indexOf(b.channel))) {
+        const group = element('section', 'channel-group');
         const row = element('div', 'channel');
         const track = element('div', 'track');
         const bar = element('i');
         const value = Math.max(0, Math.min(1, Number(channel.strength) || 0));
-        bar.style.width = `${channel.present === false ? 0 : value * 100}%`; track.append(bar);
-        row.append(element('span', '', channelNames[channel.channel] || channel.channel), track, element('small', '', channel.present === false ? '—' : value.toFixed(2)));
-        root.append(row);
+        const hasBase = typeof channel.base_strength === 'number';
+        const base = hasBase ? Math.max(0, Math.min(1, channel.base_strength)) : value;
+        bar.style.width = `${channel.present === false ? 0 : base * 100}%`; track.append(bar);
+        row.append(element('span', '', channelNames[channel.channel] || channel.channel), track, element('small', '', channel.present === false ? '未记录' : hasBase ? `${(base * 100).toFixed(3)}%` : value.toFixed(4)));
+        group.append(row);
+        const missing = channel.channel === 'affect' ? '此条没有情绪内容，不能据此判断用户没有情绪。' : '此通道未记录内容。';
+        group.append(element('p', 'channel-content', channel.content || (channel.present === false ? missing : '本轮上下文未包含此通道的原文。')));
+        if (channel.present !== false) {
+          const halfLife = channel.half_life_days ?? {fact: 4, gist: 12, affect: 180}[channel.channel];
+          const detail = hasBase ? `半衰期 ${halfLife} 天 · 召回增益 +${Number(channel.recall_boost || 0).toFixed(4)} · 召回时强度 ${value.toFixed(4)}` : `半衰期 ${halfLife} 天 · 历史快照未记录自然衰减明细，新回合召回后可查看。`;
+          group.append(element('p', 'channel-explanation', detail));
+        }
+        root.append(group);
       }
-    } else root.append(element('p', 'detail-empty', node.memory_kind === 'core' ? '常驻记忆不参与通道衰减。' : '此引用不使用记忆通道衰减。'));
+    } else root.append(element('p', 'detail-empty', node.memory_kind === 'core' ? '这是常驻身份记忆，不衰减。' : node.kind === 'cognition' ? '这是本轮思维核心的说明，不是长期记忆，因此不显示事实、感觉、情绪的保留强度。' : '此来源没有提供 MMTR 通道数据。'));
   }
   function svgElement(name, attributes = {}) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', name);

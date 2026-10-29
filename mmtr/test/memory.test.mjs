@@ -15,6 +15,29 @@ function fixture(t, options = {}) {
 const closeTo = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 const observation = (extra = {}) => ({ fact: '那天雨中在店里聊到十一点', gist: '一起包饺子', affect: '安心，亲切', entities: ['小雨'], themes: ['做饭'], ...extra });
 
+test('diagnostics separate natural decay from recall boost without changing strength', t => {
+  const { m, advance } = fixture(t);
+  const id = m.remember(observation());
+  advance(1 / 24);
+  const before = m.getMemory(id).channels;
+  assert.ok(before.find(c => c.channel === 'fact').baseStrength < before.find(c => c.channel === 'gist').baseStrength);
+  assert.ok(before.find(c => c.channel === 'gist').baseStrength < before.find(c => c.channel === 'affect').baseStrength);
+  for (const c of before) {
+    closeTo(c.baseStrength, channelStrength(c.channel, 1 / 24));
+    closeTo(c.recallBoost, 0);
+    closeTo(c.strength, c.baseStrength);
+    closeTo(c.ageDays, 1 / 24);
+    assert.equal(c.halfLifeDays, CHANNELS[c.channel].halfLife);
+  }
+  m.recall('包饺子', {style: 'full'});
+  const after = m.getMemory(id).channels;
+  for (const c of after) {
+    closeTo(c.baseStrength, channelStrength(c.channel, 1 / 24));
+    assert.ok(c.recallBoost > 0);
+    closeTo(c.strength, Math.min(1, c.baseStrength + c.recallBoost));
+  }
+});
+
 test('independent half-lives and floors are exact above each floor', () => {
   for (const [key, policy] of Object.entries(CHANNELS)) {
     closeTo(channelStrength(key, 0), 1);

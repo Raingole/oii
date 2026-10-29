@@ -13,6 +13,7 @@ import queue
 import subprocess
 import threading
 from typing import Any
+from core.memory_encoding import encode_turn
 
 
 class MmtrMemoryAdapter:
@@ -108,22 +109,18 @@ class MmtrMemoryAdapter:
     def recall_for_turn(self, user_id, session_id, turn_id, query, context_budget=None) -> str:
         return self.recall_details(user_id, session_id, turn_id, query, context_budget)["context"]
 
-    def commit_turn(self, user_id, session_id, turn_id, user_text, assistant_text, source="unknown"):
-        # Deterministic fallback extraction: compact text, no invented feelings or
-        # automatic promises/core facts. Rich extraction can supply three channels
-        # directly through remember(), including entities, themes and calendar anchors.
-        fact = f"用户：{user_text}\n助手：{assistant_text}".strip()
-        gist = str(user_text).strip()[:160]
+    def commit_turn(self, user_id, session_id, turn_id, user_text, assistant_text, source="unknown", memory_observation=None):
+        encoded = encode_turn(user_text, assistant_text, memory_observation)
         scope = str(user_id)
         stream = str(session_id or "default")
         external = None
         if turn_id is not None and str(turn_id) != "unknown":
             external = "turn:" + hashlib.sha256(f"{stream}\0{turn_id}".encode()).hexdigest()
-        item = {"scope": scope, "stream": stream, "fact": fact, "gist": gist, "affect": ""}
+        item = {"scope": scope, "stream": stream, **encoded}
         if external:
             item["externalId"] = external
         memory_id = self.call("remember", item)
-        self.call("touchSession", stream, {"scope": scope, "summary": gist})
+        self.call("touchSession", stream, {"scope": scope, "summary": encoded['gist']})
         return memory_id
 
     def remember(self, experience: dict[str, Any]):

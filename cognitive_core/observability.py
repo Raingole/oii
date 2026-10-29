@@ -29,11 +29,14 @@ def build_activity(event, memories, meaning, goals, actions, decision, llm_used,
     for item in details.get("items", [])[:8]:
         content = str(item.get("content", ""))[:4000]
         explicit = [*item.get("entities", []), *item.get("themes", [])]
-        channels = [{"channel": c["channel"], "strength": round(float(c["strength"]), 4), "present": bool(c.get("content")),
+        channels = [{"channel": c["channel"], "strength": float(c["strength"]), "present": bool(c.get("content")),
+                     "base_strength": c.get('baseStrength'), "recall_boost": c.get('recallBoost'),
+                     "half_life_days": c.get('halfLifeDays'), "floor": c.get('floor'),
                      "content": str(c.get("content", ""))[:1000] if c.get("content") and c["content"] in content else ""}
                     for c in item.get("channels", [])]
         memory_nodes.append({"id": item["id"], "kind": "memory", "memory_kind": item.get("kind", "episode"),
             "label": "约定" if item.get("kind") == "promise" else "记忆",
+            "created_at": item.get('createdAt'), "age_days": next((c.get('ageDays') for c in item.get('channels', []) if c.get('ageDays') is not None), None),
             "text": content, "terms": terms(query, content, explicit), "channels": channels,
             "reasons": [REASONS.get(value, value) for value in item.get("reasons", [])],
             "source": "本轮实际召回", "provided_to_model": llm_used})

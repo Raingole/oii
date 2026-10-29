@@ -132,13 +132,17 @@ class CognitiveCore:
                 actions = [Action.create('do_nothing', reason='proactive generation failed')] if proactive else self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
                 logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
         memory_policy = 'discard' if proactive else should_store(event, app)
-        if not (proactive or event.metadata.get('proactive_parent')) and (memory_policy == "episodic" or event.type == "action_result"):
+        # Technical action_result events are evidence for the action log, not
+        # user dialogue. Do not manufacture "用户：action_result" memories.
+        if not (proactive or event.metadata.get('proactive_parent')) and memory_policy == "episodic" and event.type != 'action_result':
             scope = {
                 "importance": max(app.values()), "event_id": event.event_id,
                 "source": event.source, "channel": event.metadata.get("channel", event.source),
                 "session_id": event.session_id, "user_id": event.metadata.get("user_id", event.actor_id),
                 "team_id": event.metadata.get("team_id", self.config.get("team_id", "personal")),
                 "agent_id": self.agent_id, "provenance": {"event_id": event.event_id, "source": event.source},
+                "memory_observation": (decision or {}).get('memory_observation', {}) if llm_used else {},
+                "assistant_text": '\n'.join(str(action.payload.get('text', '')) for action in actions if action.type in {'send_message', 'speak'}) if llm_used else '',
             }
             await self.memory.store(meaning_result["event_summary"], scope)
         if max(app.values()) >= 0.75 or event.type == "action_result":

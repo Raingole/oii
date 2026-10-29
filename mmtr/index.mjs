@@ -151,11 +151,14 @@ export class MemorableMemory {
   }
   _row(id, scope) { return this.db.prepare('SELECT * FROM memories WHERE id=? AND scope=?').get(id, scope); }
   _channels(id, now, created, stored) {
-    return (stored || this.db.prepare('SELECT * FROM channels WHERE memory_id=?').all(id)).map(row => ({
-      channel: row.channel, content: row.content, compressed: !!row.compressed,
-      strength: clamp(channelStrength(row.channel, (now - created) / DAY,
-        row.boost * Math.pow(2, -Math.max(0, now - row.boost_at) / (DAY * CHANNELS[row.channel].halfLife)))),
-    }));
+    return (stored || this.db.prepare('SELECT * FROM channels WHERE memory_id=?').all(id)).map(row => {
+      const policy = CHANNELS[row.channel], ageDays = Math.max(0, now - created) / DAY;
+      const baseStrength = channelStrength(row.channel, ageDays);
+      const recallBoost = row.boost * Math.pow(2, -Math.max(0, now - row.boost_at) / (DAY * policy.halfLife));
+      return { channel: row.channel, content: row.content, compressed: !!row.compressed,
+        strength: clamp(baseStrength + recallBoost), baseStrength, recallBoost,
+        halfLifeDays: policy.halfLife, floor: policy.floor, ageDays };
+    });
   }
   _insert(input, scope, now, kind = 'episode') {
     const created = input.at === undefined ? now : instant(input.at);

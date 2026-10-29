@@ -760,9 +760,9 @@ class MemoryManager:
             )
             self._index(db, "episode", "memory_episodes", cursor.lastrowid, summary)
 
-    def record_turn(self, user_text: str, assistant_text: str, channel: str, session_id: str, tool_result: Any = None, turn_id=None):
+    def record_turn(self, user_text: str, assistant_text: str, channel: str, session_id: str, tool_result: Any = None, turn_id=None, memory_observation=None):
         if self.using_mmtr:
-            return self.mmtr_backend.commit_turn(self.owner_id, session_id, turn_id, _text(user_text), _text(assistant_text), channel)
+            return self.mmtr_backend.commit_turn(self.owner_id, session_id, turn_id, _text(user_text), _text(assistant_text), channel, memory_observation)
         if self.using_tencent:
             self.tencent_backend.submit_commit_turn(
                 self.resolve_owner(channel, session_id), session_id,

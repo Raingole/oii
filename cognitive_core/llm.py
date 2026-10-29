@@ -5,6 +5,7 @@ import json
 from typing import Any, Protocol
 
 from .structured import parse_structured
+from core.memory_encoding import clean_observation
 
 
 class LLMError(RuntimeError):
@@ -50,6 +51,7 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
         "intent": intent,
         "message": str(message),
         "messages": [item.strip() for item in messages],
+        "memory_observation": clean_observation(value.get('memory_observation')),
         "tool": str(tool),
         "arguments": args,
         "risk_level": risk,
