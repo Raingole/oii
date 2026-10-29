@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 import asyncio
 import random
+import re
 from cognitive_core.contracts import Action, CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
@@ -44,6 +45,48 @@ class EventRouter:
                 result=await self.dispatcher.dispatch(event.event_id,action.to_dict())
                 return {'event_id':event.event_id,'actions':[action.to_dict()],
                     'dispatched':[result.to_dict()],'dsh_confirmation':confirmation['status']}
+        install_request=str(event.content.get('text') or '').strip()
+        if (dsh is not None and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')
+                and re.fullmatch(r'(?:请\s*)?(?:帮我\s*)?安装\s*(?:deepseek\s*harness|dsh)\s*(?:运行时|cli|命令行工具)?[。.!！]?',install_request,re.I)):
+            if not dsh.enabled:
+                reply='DSH 接入目前处于关闭状态，没有发起安装。'
+                status='disabled'
+            elif dsh.binary_path():
+                reply='检测到 DSH 命令行工具已安装。请直接告诉我具体 DSH 任务；每次调用都会先单独征求你的确认。'
+                status='already_installed'
+            else:
+                try:
+                    prepared=await dsh.execute('dsh_prepare',{
+                        'operation':'install_runtime',
+                        'task':'安装官方 DSH 命令行工具 @deepseek-ai/dsh。',
+                        'rationale':'主人在 QQ 私聊中明确请求安装 DSH 运行时。'},
+                        {'session_id':event.session_id,'actor_id':event.actor_id,
+                         'action':{'target':event.actor_id,'payload':{}}})
+                    if prepared.get('status')=='approval_required':
+                        code=prepared['approval_code']
+                        reply=(f"DSH 安装请求已建立，尚未安装。\n任务：{prepared['display_task']}\n"
+                            f"理由：{prepared['rationale']}\n回复“同意 {code}”开始安装，或“拒绝 {code}”取消。确认码 10 分钟内有效。")
+                        status='approval_required'
+                    else:
+                        reply='暂时无法建立 DSH 安装确认请求；没有执行安装。'
+                        status=str(prepared.get('status') or 'unavailable')
+                except PermissionError:
+                    reply='DSH 安装请求仅接受已绑定主人账号的 QQ 私聊；没有执行安装。'
+                    status='owner_only'
+                except Exception as exc:
+                    logger.warning(f'dsh install request preparation failed event_id={event.event_id} error_type={type(exc).__name__}')
+                    reply='暂时无法建立 DSH 安装确认请求；没有执行安装，请稍后再试。'
+                    status='failed'
+            action=Action.create('send_message',{'session_id':event.session_id,
+                'text':reply,'platform':'napcat'},
+                channel=str(event.metadata.get('reply_channel') or 'qq'),
+                target=str(event.metadata.get('reply_target') or event.actor_id))
+            delivery=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+            logger.info(f'dsh install request handled event_id={event.event_id} status={status} delivered={delivery.success}')
+            return {'event_id':event.event_id,'actions':[action.to_dict()],
+                'dispatched':[delivery.to_dict()],'dsh_install_request':status}
         result = await self.core.process_event(event)
         if result.get("duplicate"): return result
         actions = result.get("actions", [])
