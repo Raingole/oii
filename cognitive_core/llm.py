@@ -38,12 +38,18 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
     message = value.get("message", "")
     if message is None:
         message = ""
+    messages = value.get("messages", [])
+    if messages is None:
+        messages = []
+    if not isinstance(messages, list) or len(messages) > 4 or any(not isinstance(item, str) or not item.strip() for item in messages):
+        raise ValueError("messages must contain at most four non-empty strings")
     tool = value.get("tool", "")
     if tool is None:
         tool = ""
     return {
         "intent": intent,
         "message": str(message),
+        "messages": [item.strip() for item in messages],
         "tool": str(tool),
         "arguments": args,
         "risk_level": risk,

@@ -108,6 +108,20 @@ cognitive_core:
   autonomous_action_enabled: false
   llm_enabled: true
   conversation_window: 12
+  reply_delivery:
+    min_gap_seconds: 0.8
+    max_gap_seconds: 2.4
+  # Random conversation starters, independent of the legacy autonomy switch.
+  proactive:
+    enabled: true
+    timezone: Asia/Shanghai
+    min_interval_seconds: 900
+    max_interval_seconds: 3600
+    min_idle_seconds: 300
+    quiet_start_hour: 0
+    quiet_end_hour: 8
+    max_daily_starts: 8
+    contact_max_age_seconds: 259200
   # 在这里填写 Cognitive Core 的人格提示词；留空则只使用结构化 Self Model。
   persona_prompt: ""
 

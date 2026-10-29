@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any
+import asyncio
+import random
 from cognitive_core.contracts import CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
@@ -15,9 +17,19 @@ except ModuleNotFoundError:  # pragma: no cover
 
 class EventRouter:
     """The only controller ingress into cognition and the only action handoff."""
-    def __init__(self, core: CognitiveCore, dispatcher: ActionDispatcher): self.core, self.dispatcher = core, dispatcher
+    def __init__(self, core: CognitiveCore, dispatcher: ActionDispatcher):
+        self.core, self.dispatcher = core, dispatcher
+        self._session_locks: dict[str, asyncio.Lock] = {}
+
+    def session_busy(self, session_id: str) -> bool:
+        lock = self._session_locks.get(session_id)
+        return bool(lock and lock.locked())
 
     async def route(self, event: CognitiveEvent) -> dict[str, Any]:
+        async with self._session_locks.setdefault(event.session_id or event.event_id, asyncio.Lock()):
+            return await self._route(event)
+
+    async def _route(self, event: CognitiveEvent) -> dict[str, Any]:
         logger.info(f"cognitive event received event_id={event.event_id} source={event.source} type={event.type}")
         result = await self.core.process_event(event)
         if result.get("duplicate"): return result
@@ -26,6 +38,8 @@ class EventRouter:
         dispatched = []
         feedback = []
         for action in actions:
+            if action.get('payload', {}).get('reply_part', 1) > 1:
+                await self.pause_between_replies()
             logger.info(f"action dispatched event_id={event.event_id} action_id={action.get('action_id')} type={action.get('type')}")
             action_result = await self.dispatcher.dispatch(event.event_id, action)
             logger.info(f"action result event_id={event.event_id} action_id={action_result.action_id} status={action_result.status} success={action_result.success}")
@@ -53,6 +67,7 @@ class EventRouter:
                     "source_message_id": payload.get("source_message_id") or event.source_event_id,
                     "conversation_history": event.metadata.get("conversation_history", []),
                     "followup_reply": action.get("type") == "call_mcp" and action_result.success,
+                    "proactive_parent": bool(event.metadata.get('proactive_thought')),
                 },
             )
             feedback_result = await self.core.process_event(result_event)
@@ -60,6 +75,8 @@ class EventRouter:
             for followup in feedback_result.get("actions", []):
                 if followup.get("type") in {"do_nothing", "wait", "observe"}:
                     continue
+                if followup.get('payload', {}).get('reply_part', 1) > 1:
+                    await self.pause_between_replies()
                 logger.info(f"follow-up action dispatched event_id={result_event.event_id} action_id={followup.get('action_id')} type={followup.get('type')}")
                 followup_result = await self.dispatcher.dispatch(result_event.event_id, followup)
                 logger.info(f"follow-up action result event_id={result_event.event_id} action_id={followup_result.action_id} status={followup_result.status} success={followup_result.success}")
@@ -80,9 +97,19 @@ class EventRouter:
                     metadata={"parent_event_id": result_event.event_id, "action_type": followup.get("type")},
                 )
                 feedback.append(await self.core.process_event(followup_event))
+                if followup.get('payload', {}).get('reply_total') and followup_result.status in {'failed', 'cancelled'}:
+                    break
+            if action.get('payload', {}).get('reply_total') and action_result.status in {'failed', 'cancelled'}:
+                break
         result["dispatched"] = dispatched
         result["feedback"] = feedback
         return result
+
+    async def pause_between_replies(self) -> None:
+        config = self.core.config.get('reply_delivery', {}) or {}
+        minimum = max(0.0, min(5.0, float(config.get('min_gap_seconds', 0.8))))
+        maximum = max(minimum, min(5.0, float(config.get('max_gap_seconds', 2.4))))
+        await asyncio.sleep(random.uniform(minimum, maximum))
 
     async def handle_device_action_result(self, action_id: str, status: str, device_id: str = "", result: dict[str, Any] | None = None) -> ActionResult:
         action_result = await self.dispatcher.handle_device_action_result(action_id, status, device_id, result)

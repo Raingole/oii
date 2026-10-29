@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,13 @@ class CognitiveCore:
         if event.event_id in self.processed_events or not self.store.claim_event(event.event_id):
             return {"event_id": event.event_id, "duplicate": True, "actions": []}
         self.store.put("events", event.event_id, event.to_dict()); self.processed_events.add(event.event_id)
+        proactive = bool(event.metadata.get('proactive_thought'))
+        if event.source == 'qq' and event.type == 'message' and event.content.get('text') and event.session_id.startswith('qq:private:') and event.metadata.get('platform', 'napcat') == 'napcat':
+            self.store.runtime_set(f'contact:{self.agent_id}', {
+                'session_id': event.session_id, 'actor_id': event.actor_id,
+                'target': self._reply_target(event), 'platform': 'napcat',
+                'last_input_at': time.time(), 'event_id': event.event_id,
+            })
         identity = {
             "user_id": event.metadata.get("user_id", event.actor_id if event.source != "system" else "global"),
             "channel": event.metadata.get("channel", event.source),
@@ -74,10 +82,10 @@ class CognitiveCore:
         decision = None
         llm_used = False
         generation = {"status": "not_requested", "attempts": 0}
-        conversational = event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")
+        conversational = event.source in {"qq", "esp32"} or event.metadata.get("followup_reply") or proactive
         if conversational:
             generation["status"] = "unavailable" if self.config.get("llm_enabled", False) else "disabled"
-        if self.llm is not None and self.config.get("llm_enabled", False) and (event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")):
+        if self.llm is not None and self.config.get("llm_enabled", False) and conversational:
             try:
                 prompt = build_runtime_prompt(
                     self.self_model.to_dict(),
@@ -85,7 +93,7 @@ class CognitiveCore:
                     goals_for_turn,
                     [m.text for m in memories],
                     event.to_dict(),
-                    self.config.get("available_tools", []),
+                    [] if proactive else self.config.get("available_tools", []),
                     str(self.config.get("persona_prompt", "")),
                     history,
                 )
@@ -106,7 +114,7 @@ class CognitiveCore:
                     generation["attempts"] = attempt
                     try:
                         candidate = validate_decision(await llm.decide(prompt, context, trace_id))
-                        if candidate["intent"] == "reply" and not candidate["message"].strip():
+                        if candidate["intent"] == "reply" and not (candidate["messages"] or candidate["message"].strip()):
                             raise LLMDecisionError("empty_reply")
                         candidate_actions = self._actions_from_decision(candidate, event)
                     except Exception as exc:
@@ -121,10 +129,10 @@ class CognitiveCore:
             except Exception as exc:
                 generation.update(status="failed", error_type=type(exc).__name__)
                 decision = None
-                actions = self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
+                actions = [Action.create('do_nothing', reason='proactive generation failed')] if proactive else self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
                 logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
-        memory_policy = should_store(event, app)
-        if memory_policy == "episodic" or event.type == "action_result":
+        memory_policy = 'discard' if proactive else should_store(event, app)
+        if not (proactive or event.metadata.get('proactive_parent')) and (memory_policy == "episodic" or event.type == "action_result"):
             scope = {
                 "importance": max(app.values()), "event_id": event.event_id,
                 "source": event.source, "channel": event.metadata.get("channel", event.source),
@@ -146,24 +154,21 @@ class CognitiveCore:
             self.self_model.body = self.bodies
         self.self_model.active_goals = self.goals; self.store.save_self(self.agent_id, self.self_model)
         for action in actions: self.store.put("actions", action.action_id, action.to_dict())
-        if event.source in {"qq", "esp32", "sms", "email"} and event.type in {"message", "speech", "notification"}:
-            assistant_text = next(
-                (
+        if proactive or event.metadata.get('followup_reply') or (event.source in {"qq", "esp32", "sms", "email"} and event.type in {"message", "speech", "notification"}):
+            assistant_text = '\n'.join(
                     str(action.payload.get("text", ""))
                     for action in actions
                     if action.type in {"send_message", "speak"} and action.payload.get("text")
-                ),
-                "",
             )
             self.store.save_conversation_turn(
                 event.event_id,
                 event.session_id,
                 str(identity["user_id"]),
                 str(identity["channel"]),
-                str(event.content.get("text", "")),
+                '' if proactive or event.metadata.get('followup_reply') else str(event.content.get("text", "")),
                 assistant_text,
             )
-        if (event.source in {"qq", "esp32", "sms", "email"} and event.content.get("text")) or event.metadata.get("followup_reply"):
+        if proactive or (event.source in {"qq", "esp32", "sms", "email"} and event.content.get("text")) or event.metadata.get("followup_reply"):
             manager = getattr(self.memory, "manager", None)
             backend = getattr(manager, "backend_name", "adapter")
             try:
@@ -193,6 +198,8 @@ class CognitiveCore:
 
     def _actions_from_decision(self, decision: dict[str, Any], event: CognitiveEvent) -> list[Action]:
         intent = decision.get("intent")
+        if event.metadata.get('proactive_thought') and intent not in {'reply', 'wait', 'observe', 'do_nothing'}:
+            return [Action.create('do_nothing', reason='proactive thought cannot execute tools or schedules')]
         risk = str(decision.get("risk_level", "low") or "low")
         requires_approval = risk in {"high", "critical"}
         reason = str(decision.get("reason", "") or "LLM structured decision")
@@ -213,6 +220,21 @@ class CognitiveCore:
                 requires_controller_approval=requires_approval,
             )]
         if intent == "reply":
+            parts = decision.get('messages') or [str(decision.get('message', '') or '').strip()]
+            # Voice has one active utterance; official QQ has its own reply
+            # sequencing limits. Preserve all text in one transport message.
+            if event.source == 'esp32' or event.metadata.get('platform') == 'official':
+                parts = ['\n'.join(parts)]
+            if len(parts) > 1:
+                actions = []
+                for index, message in enumerate(parts[:4]):
+                    single = {**decision, 'messages': [], 'message': message}
+                    for action in self._actions_from_decision(single, event):
+                        action.payload.update(reply_part=index + 1, reply_total=len(parts[:4]))
+                        actions.append(action)
+                return actions
+            if parts:
+                decision = {**decision, 'message': parts[0]}
             message = str(decision.get("message", "") or "").strip()
             if not message:
                 return [Action.create("do_nothing", reason="LLM reply missing message")]

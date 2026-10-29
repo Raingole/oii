@@ -17,7 +17,8 @@ def appraisal(event: Any, goals: list[dict[str, Any]]) -> dict[str, float]:
 
 def meaning(event: Any, app: dict[str, float]) -> dict[str, Any]:
     text = str(event.content.get("text", "")).strip()
-    return {"event_summary": text or event.type, "meaning": "这件事需要被持续观察" if event.type == "heartbeat" else "收到了一项外部事件",
+    interpretation = '由本地时间与会话线索触发的主动联想' if event.metadata.get('proactive_thought') else '这件事需要被持续观察' if event.type == 'heartbeat' else '收到了一项外部事件'
+    return {"event_summary": text or event.type, "meaning": interpretation,
             "self_implication": "我需要更新当前状态并保持证据边界", "relationship_implication": "关系上下文可能需要更新" if event.source == "qq" else "",
             "goal_implication": "可能影响当前目标" if app["goal_relevance"] > 0.5 else "", "future_implication": "后续根据结果再决定", "confidence": app["certainty"]}
 

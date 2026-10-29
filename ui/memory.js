@@ -5,7 +5,7 @@
   const state = { key: '', result: null, session: '', event: '', mode: 'sentences', node: '', busy: false, request: 0, abort: null, signature: '' };
   try { state.key = sessionStorage.getItem(storageKey) || ''; } catch { /* Memory-only access still works. */ }
   const channelNames = { fact: '事实', gist: '感觉', affect: '情绪' };
-  const sourceNames = { qq: 'QQ', esp32: '语音', sms: '短信', email: '邮件', controller: '工具回执' };
+  const sourceNames = { qq: 'QQ', esp32: '语音', sms: '短信', email: '邮件', controller: '工具回执', system: '主动思考' };
   const element = (name, className, text) => {
     const node = document.createElement(name);
     if (className) node.className = className;
@@ -113,7 +113,7 @@
     const center = svgElement('foreignObject', { x: 323, y: height / 2 - 57, width: 114, height: 114 });
     const centerWrap = element('div', 'node-wrap');
     const queryTerms = left.flatMap(node => node.terms || []).filter(term => selected.input_text.includes(term));
-    const query = queryTerms[0] || short(selected.input_text || selected.query || '本轮对话', 14);
+    const query = selected.focus || queryTerms[0] || short(selected.input_text || selected.query || '本轮对话', 14);
     const centerNode = element('div', 'query-node', short(query, 18));
     centerNode.title = selected.input_text;
     centerWrap.append(centerNode); center.append(centerWrap); svg.append(center);
@@ -157,8 +157,10 @@
     }
     if (!result.events.length) $('timeline').append(element('p', 'rail-empty', '还没有对话记录。发送消息后，这里会自动更新。'));
     const selected = result.selected;
+    $('current-title').textContent = selected?.proactive ? '主动思考' : '当前对话';
+    $('current-meta').classList.toggle('is-proactive', Boolean(selected?.proactive));
     $('current-text').textContent = selected ? '“' + (selected.input_text || selected.query) + '”' : '等待一段真实对话';
-    $('current-meta').textContent = selected ? `${sourceNames[selected.source] || selected.source} · ${formatDate(selected.timestamp, true)} · ${selected.mode === 'llm' ? '模型决策' : '规则决策'}` : '';
+    $('current-meta').textContent = selected ? `${selected.proactive ? '随机主动思考' : sourceNames[selected.source] || selected.source} · ${formatDate(selected.timestamp, true)} · ${selected.mode === 'llm' ? '模型决策' : '规则决策'}` : '';
     renderGraph(); renderCognition();
     if (['failed', 'unavailable', 'disabled'].includes(selected?.generation?.status)) notice('本轮回复未能生成。请检查中控日志中的 cognitive_llm_fallback 或模型配置；记忆连接状态单独显示。');
     else if (selected?.generation?.status === 'retry_succeeded') notice('本轮首次生成失败，重试后已恢复正常回复。');

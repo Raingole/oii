@@ -194,7 +194,7 @@ class QQAgent:
                     # delivered by a Controller executor.
                     handled = bool(result.get("duplicate")) or cognitive_delivery_confirmed(dispatched)
                     delivery_attempted = cognitive_delivery_attempted(result.get("actions", []), dispatched)
-                    reply_text = messages[0] if messages else ""
+                    reply_text = '\n'.join(messages)
                     if handled and not result.get("duplicate"):
                         session.dialogue.put(Message(role="user", content=text))
                         if reply_text:
@@ -220,7 +220,7 @@ class QQAgent:
                     result = await self.cognitive_client.process(event)
                     actions = result.get("actions", [])
                     messages = [a.get("payload", {}).get("text", "") for a in actions if a.get("type") == "send_message"]
-                    if messages: return ReplyResult(messages[0], True, [], event.get("event_id", ""))
+                    if messages: return ReplyResult('\n'.join(messages), True, [], event.get("event_id", ""))
                 except (URLError, HTTPError, TimeoutError, OSError, ValueError) as exc:
                     self.logger.bind(tag=TAG).warning(f"Cognitive Core HTTP client unavailable; legacy fallback is disabled: {exc}")
             self.logger.bind(tag=TAG).error("No cognitive event router available; legacy AgentPipeline is disabled")

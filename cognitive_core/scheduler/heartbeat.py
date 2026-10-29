@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
-from ..runtime import CognitiveCore
+from ..runtime import CognitiveCore, logger
+from .proactive import ProactiveThinking
 
 
 class HeartbeatScheduler:
     def __init__(self, core: CognitiveCore, interval: float = 60.0, dispatcher: Any = None, autonomous_enabled: bool = True):
         self.core, self.interval, self.dispatcher, self.autonomous_enabled = core, max(0.1, interval), dispatcher, autonomous_enabled; self._task: asyncio.Task | None = None; self._stop = asyncio.Event(); self.last_tick: float = 0.0; self.running = False
+        self.proactive = ProactiveThinking(core, dispatcher)
 
     async def start(self) -> None:
         if self._task and not self._task.done(): return
@@ -27,12 +29,15 @@ class HeartbeatScheduler:
         if self.dispatcher:
             result["scheduled_results"] = [x.to_dict() for x in await self.dispatcher.process_due_schedules()]
             result["retry_results"] = [x.to_dict() for x in await self.dispatcher.process_due_retries()]
+            result['proactive'] = await self.proactive.run_once()
         return result
 
     async def _run(self) -> None:
         while not self._stop.is_set():
             try: await self.run_once()
             except asyncio.CancelledError: raise
-            except Exception: await asyncio.sleep(min(self.interval, 5.0))
+            except Exception as exc:
+                logger.warning(f'cognitive_scheduler_failed error_type={type(exc).__name__}')
+                await asyncio.sleep(min(self.interval, 5.0))
             try: await asyncio.wait_for(self._stop.wait(), timeout=self.interval)
             except asyncio.TimeoutError: pass

@@ -40,6 +40,7 @@ class StateStore:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP, payload TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_memory_activity_session ON memory_activity(session_id,seq);
+            CREATE TABLE IF NOT EXISTS runtime_state (key TEXT PRIMARY KEY, payload TEXT NOT NULL);
             """)
             if db.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0: db.execute("INSERT INTO schema_version(version) VALUES(1)")
             db.commit()
@@ -91,7 +92,7 @@ class StateStore:
         user_text: str,
         assistant_text: str = "",
     ) -> None:
-        if not session_id or not user_text:
+        if not session_id or not (user_text or assistant_text):
             return
         db = sqlite3.connect(self.path)
         try:
@@ -121,10 +122,27 @@ class StateStore:
             db.close()
         history: list[dict[str, str]] = []
         for user_text, assistant_text in reversed(rows):
-            history.append({"role": "user", "content": user_text})
+            if user_text:
+                history.append({"role": "user", "content": user_text})
             if assistant_text:
                 history.append({"role": "assistant", "content": assistant_text})
         return history
+
+    def runtime_get(self, key: str) -> dict[str, Any]:
+        db = sqlite3.connect(self.path)
+        try:
+            row = db.execute('SELECT payload FROM runtime_state WHERE key=?', (key,)).fetchone()
+            return json.loads(row[0]) if row else {}
+        finally:
+            db.close()
+
+    def runtime_set(self, key: str, value: dict[str, Any]) -> None:
+        db = sqlite3.connect(self.path)
+        try:
+            db.execute('INSERT INTO runtime_state(key,payload) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload', (key, json.dumps(value, ensure_ascii=False)))
+            db.commit()
+        finally:
+            db.close()
 
     def save_memory_activity(self, activity: dict[str, Any]) -> None:
         db = sqlite3.connect(self.path)
