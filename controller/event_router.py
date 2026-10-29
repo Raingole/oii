@@ -34,21 +34,28 @@ def explicit_bilibili_topic(text: str) -> str | None:
         prefix + r'(?:搜索|查找|搜)(?:一下|下)?(?:并)?(?:学习|学)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
         prefix + r'(?:学习|学)(?:一下|下)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
     )
-    for pattern in patterns:
-        match = re.match(pattern, value, re.I)
-        if not match:
-            continue
-        topic = match.group(1).strip().strip(' \t\r\n：:，,。.!！?？「」“”\"\'')
-        topic = re.sub(r'(?:并)?(?:加入|收录|存入)(?:知识库|知识花园)?$', '', topic).strip()
-        topic = re.sub(r'\s*(?:这个|那个)?梗(?:视频|出处|是什么|的)?$', '', topic).strip()
-        if topic.lower() in {'梗', '一个梗', '个梗', '新梗', '一个新梗', '随机梗', '热梗'}:
-            return None
-        if re.match(r'^(?:的|是|了|到|出来|什么|啥|哪|怎么|为啥|为什么)', topic):
-            return None
-        if re.search(r'(?:是啥|是什么|为啥|为什么|哪儿?|怎么|吗|呢)[?？。!！]*$', topic):
-            return None
-        if 2 <= len(topic) <= 80:
-            return topic
+    candidates = [value]
+    # Accept an explicit command after a short conversational preface, e.g.
+    # “我重启好了 现在搜 token来token来 这个梗”. Only command-leading cues
+    # may start a suffix, so casual mentions of someone searching stay chat.
+    for cue in re.finditer(r'(?<!\S)(?:现在|立即|马上|接下来|那就|去|来)(?=\s|搜|搜索|查找|学|学习|B站|哔哩哔哩)', value):
+        candidates.append(value[cue.start():].strip())
+    for candidate in candidates:
+        for pattern in patterns:
+            match = re.match(pattern, candidate, re.I)
+            if not match:
+                continue
+            topic = match.group(1).strip().strip(' \t\r\n：:，,。.!！?？「」“”\"\'')
+            topic = re.sub(r'(?:并)?(?:加入|收录|存入)(?:知识库|知识花园)?$', '', topic).strip()
+            topic = re.sub(r'\s*(?:这个|那个)?梗(?:视频|出处|是什么|的)?$', '', topic).strip()
+            if topic.lower() in {'梗', '一个梗', '个梗', '新梗', '一个新梗', '随机梗', '热梗'}:
+                return None
+            if re.match(r'^(?:的|是|了|到|出来|什么|啥|哪|怎么|为啥|为什么)', topic):
+                return None
+            if re.search(r'(?:是啥|是什么|为啥|为什么|哪儿?|怎么|吗|呢)[?？。!！]*$', topic):
+                return None
+            if 2 <= len(topic) <= 80:
+                return topic
     return None
 
 
