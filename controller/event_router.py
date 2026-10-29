@@ -18,11 +18,21 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 def explicit_bilibili_topic(text: str) -> str | None:
-    """Extract an explicit topic request; generic requests for a meme remain random."""
+    """Extract only imperative, explicit learning/search requests.
+
+    Mentioning that someone searched, or asking what was searched, must stay in
+    normal conversation and must not trigger the early learning route.
+    """
     value = str(text or '').strip()
+    # Questions such as “你搜索的是啥” used to match the optional “你” prefix
+    # and treat the remainder as a topic, bypassing ordinary chat entirely.
+    if re.search(r'(?:搜索|查找|搜)(?:的是|的(?:关键词|关键字|内容|东西)|出来的|到的).{0,24}(?:是啥|是什么|为啥|为什么|哪|怎么|什么|啥)', value, re.I):
+        return None
+    lead = r'(?:(?:我(?:想|要|希望|需要)(?:让你|让他|让它)?|我让(?:你|他|它)|请(?:你)?|麻烦你|帮我|你(?:自己去|去|帮我|现在|立即|马上)?|现在|立即|马上|去)\s*)?'
+    prefix = lead + r'(?:现在|立即|马上)?(?:去)?(?:B站|哔哩哔哩)?\s*'
     patterns = (
-        r'^(?:我)?(?:想|要|希望|需要)?(?:让你|让他|让它|请你|帮我|你)?(?:现在|立即|马上)?(?:去)?(?:B站|哔哩哔哩)?\s*(?:搜索|搜|查找)(?:一下|下)?(?:并)?(?:学习|学)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
-        r'^(?:我)?(?:想|要|希望|需要)?(?:让你|让他|让它|请你|帮我|你)?(?:现在|立即|马上)?(?:去)?(?:B站|哔哩哔哩)?\s*(?:学习|学)(?:一下|下)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
+        prefix + r'(?:搜索|查找|搜)(?:一下|下)?(?:并)?(?:学习|学)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
+        prefix + r'(?:学习|学)(?:一下|下)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
     )
     for pattern in patterns:
         match = re.match(pattern, value, re.I)
@@ -31,6 +41,10 @@ def explicit_bilibili_topic(text: str) -> str | None:
         topic = match.group(1).strip().strip(' \t\r\n：:，,。.!！?？「」“”\"\'')
         topic = re.sub(r'(?:并)?(?:加入|收录|存入)(?:知识库|知识花园)?$', '', topic).strip()
         if topic.lower() in {'梗', '一个梗', '个梗', '新梗', '一个新梗', '随机梗', '热梗'}:
+            return None
+        if re.match(r'^(?:的|是|了|到|出来|什么|啥|哪|怎么|为啥|为什么)', topic):
+            return None
+        if re.search(r'(?:是啥|是什么|为啥|为什么|哪儿?|怎么|吗|呢)[?？。!！]*$', topic):
             return None
         if 2 <= len(topic) <= 80:
             return topic
