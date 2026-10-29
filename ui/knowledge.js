@@ -2,6 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id);
   const keyName='mmtr.observer.key.v1';
+  const validKey=value=>/^[\x21-\x7e]+$/.test(value);
   const state={key:'',data:null,filter:'all',query:'',busy:false,images:[]};
   try{state.key=sessionStorage.getItem(keyName)||'';}catch{}
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
@@ -92,14 +93,14 @@
     for(const card of cards)container.append(card);
   }
   async function load(){
-    if(!state.key)return;state.busy=true;setStatus('正在读取');
+    if(!state.key)return;if(!validKey(state.key)){state.data=null;state.key='';try{sessionStorage.removeItem(keyName);}catch{}setStatus('访问密钥格式不正确');$('auth-error').textContent='请只粘贴命令输出的访问密钥，不要包含说明文字或非英文字符。';openDialog();return;}state.busy=true;setStatus('正在读取');
     try{const response=await fetch('/api/knowledge/library',{headers:{Authorization:'Bearer '+state.key},cache:'no-store'});if(response.status===401){state.data=null;setStatus('密钥无效');$('auth-error').textContent='访问密钥不正确或已过期。';openDialog();return;}if(!response.ok)throw new Error('知识库服务暂不可用');
       state.data=await response.json();refreshCounts(state.data);refreshLearning(state.data);render();setStatus('已连接',true);notice('');$('updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
     }catch(error){setStatus('连接失败');notice(error.message||'读取知识库失败。');}finally{state.busy=false;}
   }
   function openDialog(){if(!$('auth-dialog').open)$('auth-dialog').showModal();}
   $('connect').addEventListener('click',openDialog);$('connect-empty').addEventListener('click',openDialog);$('close-dialog').addEventListener('click',()=>$('auth-dialog').close());
-  $('auth-form').addEventListener('submit',async event=>{event.preventDefault();state.key=$('token').value.trim();$('auth-error').textContent='';await load();if(state.data){try{sessionStorage.setItem(keyName,state.key);}catch{}$('auth-dialog').close();}});
+  $('auth-form').addEventListener('submit',async event=>{event.preventDefault();state.key=$('token').value.trim();$('auth-error').textContent='';if(!validKey(state.key)){$('auth-error').textContent='请只粘贴命令输出的访问密钥，不要包含说明文字或非英文字符。';return;}await load();if(state.data){try{sessionStorage.setItem(keyName,state.key);}catch{}$('auth-dialog').close();}});
   $('disconnect').addEventListener('click',()=>{state.key='';state.data=null;try{sessionStorage.removeItem(keyName);}catch{}$('auth-dialog').close();refreshCounts({counts:{}});render();setStatus('已断开');});
   $('refresh').addEventListener('click',load);$('search').addEventListener('input',event=>{state.query=event.target.value;render();});
   document.querySelectorAll('.filter').forEach(button=>button.addEventListener('click',()=>{state.filter=button.dataset.filter;document.querySelectorAll('.filter').forEach(item=>item.classList.toggle('active',item===button));render();}));
