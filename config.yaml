@@ -155,7 +155,9 @@ learning:
 
 visual_understanding:
   enabled: true
+  provider: deepseek # Reuse the selected DeepSeek chat account's API key for image understanding.
   max_images_per_message: 2
+  asset_limit_per_scope: 300
   timeout_seconds: 25
   # Explicitly list a local asset host only if QQ serves images from it.
   trusted_image_hosts: []

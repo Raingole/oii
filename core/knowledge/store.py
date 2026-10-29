@@ -38,6 +38,9 @@ class KnowledgeStore:
                 CREATE TABLE IF NOT EXISTS media (
                   scope TEXT NOT NULL,hash TEXT NOT NULL,model TEXT NOT NULL,payload TEXT NOT NULL,
                   created REAL NOT NULL,PRIMARY KEY(scope,hash,model));
+                CREATE TABLE IF NOT EXISTS meme_assets (
+                  scope TEXT NOT NULL,hash TEXT NOT NULL,image BLOB NOT NULL,payload TEXT NOT NULL,
+                  created REAL NOT NULL,used REAL NOT NULL DEFAULT 0,PRIMARY KEY(scope,hash));
             ''')
 
     def connect(self):
@@ -144,7 +147,32 @@ class KnowledgeStore:
             row = db.execute('SELECT payload FROM media WHERE scope=? AND hash=? AND model=?', (scope, digest, model)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def save_meme_asset(self, scope, digest, image, payload, limit=300):
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO meme_assets(scope,hash,image,payload,created,used) VALUES (?,?,?,?,?,COALESCE((SELECT used FROM meme_assets WHERE scope=? AND hash=?),0))',
+                (scope,digest,image,json.dumps(payload,ensure_ascii=False),time.time(),scope,digest))
+            db.execute('DELETE FROM meme_assets WHERE rowid IN (SELECT rowid FROM meme_assets WHERE scope=? ORDER BY created DESC LIMIT -1 OFFSET ?)',(scope,max(1,int(limit))))
+
+    def find_meme_asset(self, scope, query):
+        terms=set(search_terms(query))
+        if not terms:
+            return None
+        with self.connect() as db:
+            rows=db.execute('SELECT hash,image,payload,created,used FROM meme_assets WHERE scope=?',(scope,)).fetchall()
+            best=None; best_score=0
+            for row in rows:
+                payload=json.loads(row['payload'])
+                corpus=' '.join([str(payload.get(k,'')) for k in ('description','visible_text','intent','context','usage_scenarios','tags','kind')])
+                matched=terms.intersection(search_terms(corpus))
+                score=len(matched)/(len(terms) or 1)
+                if score>best_score or (score==best_score and best and row['used']<best['used']):
+                    best={**dict(row),'payload':payload};best_score=score
+            if best and best_score>=0.12:
+                db.execute('UPDATE meme_assets SET used=? WHERE scope=? AND hash=?',(time.time(),scope,best['hash']))
+                return {'hash':best['hash'],'image':bytes(best['image']),'payload':best['payload'],'score':best_score}
+            return None
+
     def status(self, scope=None):
         with self.connect() as db:
             where, args = (' WHERE scope=?', (scope,)) if scope else ('', ())
-            return {name: db.execute(f'SELECT COUNT(*) FROM {name}' + where, args).fetchone()[0] for name in ('sources', 'interests', 'jobs', 'media')}
+            return {name: db.execute(f'SELECT COUNT(*) FROM {name}' + where, args).fetchone()[0] for name in ('sources', 'interests', 'jobs', 'media', 'meme_assets')}

@@ -22,7 +22,7 @@ class VideoService:
         'video_duration_limit','video_window_limit','video_screenshot_time_invalid','video_screenshot_invalid',
         'bilibili_wbi_unavailable','video_dependency_missing'}
     TOOLS = {'surfcore_video_info', 'surfcore_video_subtitles', 'bilibili_watch_video',
-             'bilibili_video_screenshot','video_job_status', 'qq_send_image', 'bilibili_autoshare'}
+             'bilibili_video_screenshot','video_job_status', 'qq_send_image', 'qq_send_relevant_image', 'bilibili_autoshare'}
 
     def __init__(self, root, config, store, core):
         self.root, self.config, self.store, self.core = Path(root), config, store, core
@@ -65,6 +65,8 @@ class VideoService:
             tool('video_job_status','查询当前会话的视频任务，完成后返回画面笔记、编号时间和可发图的artifact_id。',{'job_id':{'type':'string'}},['job_id']),
             tool('qq_send_image','向当前NapCat QQ私聊发送图片。提供当前会话artifact_id或公开https图片url，二选一。必须以工具送达结果为准。',
                 {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}}),
+            tool('qq_send_relevant_image','从当前QQ私聊收到并保存在本地的图片库中，按语境挑一张合适的表情包或图片发出。仅当图片确实能自然补充当前回复时调用；先用具体语境描述检索，不要为了发图而发图。只会使用当前私聊用户自己的图片。',
+                {'query':{'type':'string','description':'当前对话里希望图片表达的含义、情绪或场景'},'caption':{'type':'string','description':'可选的简短配文'}},['query']),
             tool('bilibili_autoshare','查看或调整按聊天兴趣自主分享B站视频；每天最多分享数由中控限制。用户要求停止时设置enabled=false。',
                 {'enabled':{'type':'boolean'}})]
 
@@ -90,6 +92,8 @@ class VideoService:
         if metadata.get('scope')!=scope:
             raise PermissionError('image_scope_mismatch')
         path=folder/'sheet.png'
+        if not path.is_file():
+            path=folder/'sheet.jpg'
         if not path.is_file() or path.stat().st_size>5*1024*1024:
             raise ValueError('image_unavailable')
         return path
@@ -194,6 +198,23 @@ class VideoService:
             self.artifact(scope,ident)
             seed=str((context.get('action') or {}).get('action_id') or uuid.uuid4().hex)
             return await self.send(route,ident,str(arguments.get('caption') or '')[:500],seed)
+        if name=='qq_send_relevant_image':
+            route=self.route(context)
+            if not route or not self.sender:
+                raise ValueError('napcat_private_reply_required')
+            match=self.store.find_meme_asset(scope,str(arguments.get('query') or '')[:300])
+            if not match:
+                return {'status':'no_relevant_saved_image'}
+            ident=uuid.uuid4().hex
+            folder=self.folder(scope,ident)
+            (folder/'sheet.jpg').write_bytes(match['image'])
+            metadata={'scope':scope,'source':'local_image_library','hash':match['hash']}
+            (folder/'owner.json').write_text(json.dumps(metadata),encoding='utf-8')
+            seed=str((context.get('action') or {}).get('action_id') or ident)
+            result=await self.send(route,ident,str(arguments.get('caption') or '')[:500],seed)
+            if isinstance(result,dict):
+                result['image_match']={k:match['payload'].get(k) for k in ('kind','description','intent','context','usage_scenarios','expressed_emotions')}
+            return result
         raise ValueError('unknown_video_tool')
 
     async def send(self, route, ident, caption, seed):
