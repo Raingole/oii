@@ -1,6 +1,8 @@
 """Authenticated read-only observer routes, shared by both HTTP entrypoints."""
+import asyncio
 import secrets
 from pathlib import Path
+import re
 from aiohttp import web
 from config.observer_access import observer_token
 
@@ -11,6 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def register_observer(app, core_provider, config, *, root=None):
     key = observer_token(config, root or ROOT)
 
+    def valid_key(request):
+        expected = "Bearer " + key
+        return secrets.compare_digest(request.headers.get("Authorization", "").encode("utf-8"), expected.encode("utf-8"))
+
+    def knowledge_scope(core):
+        owner=str(((config.get('qq') or {}).get('owner_qq') or '')).strip()
+        if re.fullmatch(r'\d{5,20}',owner):
+            return 'qq:private:'+owner
+        return ''
+
     def asset(name):
         async def handler(_request):
             response = web.FileResponse(ROOT / "ui" / name)
@@ -20,8 +32,7 @@ def register_observer(app, core_provider, config, *, root=None):
         return handler
 
     async def activity(request):
-        expected = "Bearer " + key
-        if not secrets.compare_digest(request.headers.get("Authorization", "").encode("utf-8"), expected.encode("utf-8")):
+        if not valid_key(request):
             return web.json_response({"ok": False, "error": "observer_key_required"}, status=401, headers={"Cache-Control": "no-store"})
         core = core_provider()
         if core is None:
@@ -38,9 +49,46 @@ def register_observer(app, core_provider, config, *, root=None):
                        "memory_degraded": bool(getattr(core.memory, "degraded", False))})
         return web.json_response(result, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
+    async def knowledge_library(request):
+        if not valid_key(request):
+            return web.json_response({"ok":False,"error":"observer_key_required"},status=401,headers={"Cache-Control":"no-store"})
+        core=core_provider()
+        learning=getattr(core,'learning',None) if core else None
+        if learning is None:
+            return web.json_response({"ok":False,"error":"knowledge_store_unavailable"},status=503,headers={"Cache-Control":"no-store"})
+        scope=knowledge_scope(core)
+        if not scope:
+            return web.json_response({"ok":True,"scope":"","counts":{"sources":0,"meme_entries":0,"video_notes":0,"images":0},"sources":[],"images":[]},headers={"Cache-Control":"no-store"})
+        result=await asyncio.to_thread(learning.store.library,scope,200)
+        result['ok']=True
+        return web.json_response(result,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
+
+    async def knowledge_image(request):
+        if not valid_key(request):
+            return web.json_response({"ok":False,"error":"observer_key_required"},status=401,headers={"Cache-Control":"no-store"})
+        digest=request.match_info.get('digest','')
+        if not re.fullmatch(r'[0-9a-f]{64}',digest):
+            raise web.HTTPNotFound()
+        core=core_provider()
+        learning=getattr(core,'learning',None) if core else None
+        scope=knowledge_scope(core) if learning else ''
+        item=await asyncio.to_thread(learning.store.image_asset,scope,digest) if scope else None
+        if not item or len(item['image'])>5*1024*1024:
+            raise web.HTTPNotFound()
+        return web.Response(body=item['image'],content_type='image/jpeg',headers={
+            "Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
+            "Referrer-Policy":"no-referrer"})
+
     app.router.add_get("/memory", asset("memory.html"))
     app.router.add_get("/memory/", asset("memory.html"))
     app.router.add_get("/memory.html", asset("memory.html"))
     app.router.add_get("/memory.css", asset("memory.css"))
     app.router.add_get("/memory.js", asset("memory.js"))
     app.router.add_get("/api/memory/activity", activity)
+    app.router.add_get("/knowledge", asset("knowledge.html"))
+    app.router.add_get("/knowledge/", asset("knowledge.html"))
+    app.router.add_get("/knowledge.html", asset("knowledge.html"))
+    app.router.add_get("/knowledge.css", asset("knowledge.css"))
+    app.router.add_get("/knowledge.js", asset("knowledge.js"))
+    app.router.add_get("/api/knowledge/library", knowledge_library)
+    app.router.add_get("/api/knowledge/images/{digest}", knowledge_image)

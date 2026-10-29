@@ -139,6 +139,53 @@ class KnowledgeStore:
             result.append(item)
         return result
 
+    def random_reference(self, scope, source_types=None):
+        """Return one recent, source-backed learning chunk for contextual reflection."""
+        allowed=tuple(source_types or ('subtitle','ai_subtitle','asr','bilibili_meme_transcript','storyboard_sample'))
+        if not allowed:
+            return None
+        marks=','.join('?' for _ in allowed)
+        with self.connect() as db:
+            row=db.execute(f'''SELECT c.text,c.start,s.url,s.title,s.data_source,s.created
+                FROM chunks c JOIN sources s ON s.id=c.source_id
+                WHERE s.scope=? AND s.data_source IN ({marks})
+                ORDER BY s.created DESC, c.id DESC LIMIT 80''',(scope,*allowed)).fetchall()
+        if not row:
+            return None
+        import random
+        item=dict(random.choice(row))
+        item['timestamp_url']=item['url']+(
+            (('&' if '?' in item['url'] else '?')+'t='+str(int(item['start'])))
+            if item.get('start') is not None else '')
+        item['text']=str(item.get('text') or '')[:900]
+        return item
+
+    def library(self, scope, limit=200):
+        limit=min(200,max(1,int(limit)))
+        with self.connect() as db:
+            sources=db.execute('''SELECT id,url,title,data_source,summary,created FROM sources
+                WHERE scope=? ORDER BY created DESC LIMIT ?''',(scope,limit)).fetchall()
+            items=[]
+            for source in sources:
+                chunks=db.execute('SELECT id,text,start,end FROM chunks WHERE source_id=? ORDER BY id LIMIT 8',(source['id'],)).fetchall()
+                bounded=[{**dict(chunk),'text':str(chunk['text'])[:900]} for chunk in chunks]
+                items.append({**dict(source),'chunks':bounded})
+            assets=db.execute('SELECT hash,payload,created,used FROM meme_assets WHERE scope=? ORDER BY created DESC LIMIT 100',(scope,)).fetchall()
+            counts={
+                'sources':db.execute('SELECT COUNT(*) FROM sources WHERE scope=?',(scope,)).fetchone()[0],
+                'meme_entries':db.execute('''SELECT COUNT(*) FROM chunks c JOIN sources s ON s.id=c.source_id
+                    WHERE s.scope=? AND s.data_source='bilibili_meme_transcript' ''',(scope,)).fetchone()[0],
+                'video_notes':db.execute('''SELECT COUNT(*) FROM sources WHERE scope=? AND data_source!='bilibili_meme_transcript' ''',(scope,)).fetchone()[0],
+                'images':db.execute('SELECT COUNT(*) FROM meme_assets WHERE scope=?',(scope,)).fetchone()[0],
+            }
+        return {'scope':scope,'counts':counts,'sources':items,
+            'images':[{'hash':row['hash'],'payload':json.loads(row['payload']),'created':row['created'],'used':row['used']} for row in assets]}
+
+    def image_asset(self, scope, digest):
+        with self.connect() as db:
+            row=db.execute('SELECT image,payload FROM meme_assets WHERE scope=? AND hash=?',(scope,digest)).fetchone()
+        return {'image':bytes(row['image']),'payload':json.loads(row['payload'])} if row else None
+
     def media(self, scope, digest, model, value=None):
         with self.connect() as db:
             if value is not None:

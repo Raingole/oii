@@ -145,6 +145,7 @@ async def main():
         if ws_server.cognitive_runtime and ws_server.cognitive_runtime.learning:
             catalog.register('learning',ws_server.cognitive_runtime.learning)
             ws_server.cognitive_runtime.learning.video.sender = ws_server.action_dispatcher.dispatch
+            ws_server.cognitive_runtime.learning.dsh.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.core.config.setdefault('available_tools',[]).extend(await ws_server.cognitive_runtime.learning.discover())
         tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))
         async def _esp_executor(action):

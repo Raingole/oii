@@ -32,10 +32,19 @@ class ProactiveThinking:
             zone = timezone(timedelta(hours=8))
         return datetime.fromtimestamp(now, zone)
 
-    def interval(self):
-        minimum = max(60, float(self.config.get('min_interval_seconds', 900)))
-        maximum = max(minimum, float(self.config.get('max_interval_seconds', 3600)))
-        return self.rng.uniform(minimum, maximum)
+    def daily_time(self, local, now):
+        """Choose one persistent randomized time inside today's active window."""
+        start_hour=int(self.config.get('daily_start_hour',9))%24
+        end_hour=int(self.config.get('daily_end_hour',22))%24
+        start=local.replace(hour=start_hour,minute=0,second=0,microsecond=0)
+        end=local.replace(hour=end_hour,minute=0,second=0,microsecond=0)
+        if end<=start:
+            end+=timedelta(days=1)
+        eligible=max(start.timestamp(),now+60)
+        if eligible>=end.timestamp():
+            start+=timedelta(days=1);end+=timedelta(days=1)
+            eligible=start.timestamp()
+        return self.rng.uniform(eligible,end.timestamp())
 
     def quiet(self, hour):
         start = int(self.config.get('quiet_start_hour', 0)) % 24
@@ -105,16 +114,15 @@ class ProactiveThinking:
         local = self.local_time(now)
         state = self.core.store.runtime_get(self.key)
         if state.get('day') != local.date().isoformat():
-            state.update(day=local.date().isoformat(), count=0)
-        if not state.get('next_at'):
-            state['next_at'] = now + self.interval()
+            state.update(day=local.date().isoformat(), count=0,
+                next_at=self.daily_time(local,now))
             self.core.store.runtime_set(self.key, state)
-            logger.info(f'proactive thought scheduled next_at={state["next_at"]}')
-            return {'status': 'scheduled', 'next_at': state['next_at']}
+        if not state.get('next_at'):
+            state['next_at']=self.daily_time(local,now)
+            self.core.store.runtime_set(self.key,state)
+        if now < state['next_at']:
+            return {'status':'scheduled','next_at':state['next_at']}
         if self.quiet(local.hour):
-            if state['next_at'] <= now:
-                state['next_at'] = now + self.interval()
-                self.core.store.runtime_set(self.key, state)
             return {'status': 'quiet_hours'}
         if state.get('count', 0) >= max(0, int(self.config.get('max_daily_starts', 8))):
             return {'status': 'daily_limit'}
@@ -135,7 +143,7 @@ class ProactiveThinking:
         # Reserve before inference/delivery. Restart or failure cannot replay
         # a due thought or reset today's budget into a burst of messages.
         recent_topics=[topic,*[item for item in recent_topics if item!=topic]][:max(1,int(self.config.get('topic_cooldown_count',5)))]
-        state.update(count=state.get('count', 0) + 1, next_at=now + self.interval(),
+        state.update(count=state.get('count', 0) + 1,
             last_topic=topic,recent_topics=recent_topics)
         self.core.store.runtime_set(self.key, state)
         meme_context = ''
@@ -152,6 +160,14 @@ class ProactiveThinking:
                              'seconds': item.get('start')}))
             except Exception:
                 meme_context = ''
+            try:
+                reference=learning.store.random_reference(session)
+                if reference:
+                    meme_context += ('\n最近学到的一条 B 站资料（仅作联想线索，需结合聊天判断）：' +
+                        str({'title':reference.get('title'),'text':reference.get('text'),
+                             'source':reference.get('timestamp_url'),'data_source':reference.get('data_source')}))
+            except Exception:
+                pass
         event = CognitiveEvent.create('system', 'proactive_thought', 'self', 'self',
             {'text': f'本地时间 {local:%Y-%m-%d %H:%M}。本轮随机思考角度（只作启发，不是指定话题）：{clue}。请结合最近对话、真实记忆、当前情景和交流语气，自行生成一个有上下文的新想法；也可以判断没有自然话题并保持安静。{meme_context}'},
             session_id=session, metadata={'proactive_thought': True, 'topic': topic,

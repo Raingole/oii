@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 import asyncio
 import random
-from cognitive_core.contracts import CognitiveEvent
+from cognitive_core.contracts import Action, CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
 from contracts.results import ActionResult
@@ -31,6 +31,19 @@ class EventRouter:
 
     async def _route(self, event: CognitiveEvent) -> dict[str, Any]:
         logger.info(f"cognitive event received event_id={event.event_id} source={event.source} type={event.type}")
+        dsh=getattr(getattr(self.core,'learning',None),'dsh',None)
+        if (dsh is not None and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')):
+            confirmation=await dsh.handle_confirmation(event)
+            if confirmation is not None:
+                action=Action.create('send_message',{'session_id':event.session_id,
+                    'text':confirmation['text'],'platform':'napcat'},
+                    channel=str(event.metadata.get('reply_channel') or 'qq'),
+                    target=str(event.metadata.get('reply_target') or event.actor_id))
+                result=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+                return {'event_id':event.event_id,'actions':[action.to_dict()],
+                    'dispatched':[result.to_dict()],'dsh_confirmation':confirmation['status']}
         result = await self.core.process_event(event)
         if result.get("duplicate"): return result
         actions = result.get("actions", [])

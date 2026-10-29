@@ -66,6 +66,8 @@ class LearningService:
         self.lock = asyncio.Lock()
         from .video import VideoService
         self.video = VideoService(self.root,config,self.store,core)
+        from .dsh import DSHService
+        self.dsh = DSHService(self.root,config,core,self.store)
 
     @property
     def settings(self):
@@ -402,7 +404,7 @@ class LearningService:
             tool('bilibili_learn_video','把一个BV视频加入本地知识学习队列，稍后读取字幕并写来源笔记。',{'video':{'type':'string'}},['video']),
             tool('knowledge_search','检索当前会话的已学知识，返回视频来源与时间点。',{'query':{'type':'string'}},['query']),
             tool('meme_knowledge_search','只检索自动收录的B站梗条目，附字幕证据、解释视频来源和时间点。',{'query':{'type':'string'}},['query']),
-            tool('learning_status','查看当前会话的知识库数量、学习任务与上次运行状态。',{})] + self.video.discover()
+            tool('learning_status','查看当前会话的知识库数量、学习任务与上次运行状态。',{})] + self.video.discover() + self.dsh.discover()
 
     async def execute(self,name,arguments,context):
         if name in self.video.TOOLS:
@@ -427,6 +429,8 @@ class LearningService:
             last=self.store.state('last_run')
             return {'counts':self.store.status(scope),'last_run':last if last.get('scope')==scope else {},
                 'schedule':self.store.state('schedule'),'meme_schedule':self.store.state('meme_schedule')}
+        if name in {'dsh_prepare','dsh_status'}:
+            return await self.dsh.execute(name,arguments,context)
         raise ValueError('unknown_learning_tool')
 
     async def close(self):

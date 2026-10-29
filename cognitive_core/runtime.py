@@ -111,7 +111,7 @@ class CognitiveCore:
                     [m.text for m in memories],
                     event.to_dict(),
                     ([item for item in self.config.get("available_tools", [])
-                      if self._tool_name(item) == 'bilibili_video_screenshot'] if proactive
+                      if self._tool_name(item) in {'bilibili_video_screenshot','dsh_prepare'}] if proactive
                      else self.config.get("available_tools", [])),
                     str(self.config.get("persona_prompt", "")),
                     history,
@@ -232,8 +232,8 @@ class CognitiveCore:
         intent = decision.get("intent")
         if event.metadata.get('proactive_thought') and intent not in {'reply', 'wait', 'observe', 'do_nothing'}:
             tool = str(decision.get('tool', '') or '').strip()
-            if intent != 'tool_call' or tool != 'bilibili_video_screenshot':
-                return [Action.create('do_nothing', reason='proactive thought tool is outside the meme screenshot allowlist')]
+            if intent != 'tool_call' or tool not in {'bilibili_video_screenshot','dsh_prepare'}:
+                return [Action.create('do_nothing', reason='proactive thought tool is outside the screenshot and DSH request-preparation allowlist')]
         risk = str(decision.get("risk_level", "low") or "low")
         requires_approval = risk in {"high", "critical"}
         reason = str(decision.get("reason", "") or "LLM structured decision")
@@ -315,6 +315,7 @@ class CognitiveCore:
                 {"tool": tool, "arguments": arguments, "session_id": event.session_id,
                  "reply_target": self._reply_target(event),
                  "reply_channel": event.metadata.get("reply_channel") or event.source,
+                 "proactive_thought": bool(event.metadata.get('proactive_thought')),
                  "platform": event.metadata.get("platform", event.source)},
                 target=self._reply_target(event),
                 channel=str(event.metadata.get("reply_channel") or event.source),

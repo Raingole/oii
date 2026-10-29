@@ -115,12 +115,12 @@ cognitive_core:
   proactive:
     enabled: true
     timezone: Asia/Shanghai
-    min_interval_seconds: 900
-    max_interval_seconds: 3600
+    daily_start_hour: 9
+    daily_end_hour: 22
     min_idle_seconds: 300
     quiet_start_hour: 0
     quiet_end_hour: 8
-    max_daily_starts: 8
+    max_daily_starts: 1
     contact_max_age_seconds: 259200
     topic_cooldown_count: 5
   # 在这里填写 Cognitive Core 的人格提示词；留空则只使用结构化 Self Model。
@@ -160,6 +160,21 @@ learning:
   bilibili:
     timeout_seconds: 20
     fallback_to_asr: false
+
+# DSH tasks are proposed and executed only after one-time approval in the
+# owner's private QQ chat. The headless CLI, when installed, runs as this
+# service process user and cannot outlive its approved task.
+dsh:
+  enabled: true
+  binary: dsh
+  npm_binary: npm
+  profile: headless
+  home: data/dsh
+  workspace: .
+  approval_ttl_seconds: 600
+  timeout_seconds: 1800
+  install_timeout_seconds: 900
+  reply_limit_chars: 5000
 
 visual_understanding:
   enabled: true
