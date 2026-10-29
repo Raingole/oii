@@ -81,6 +81,9 @@ class EventRouter:
         learning=getattr(self.core,'learning',None)
         meme_request=str(event.content.get('text') or '').strip()
         owner_qq=str(((getattr(learning,'config',{}) or {}).get('qq') or {}).get('owner_qq') or '') if learning else ''
+        actor_qq=str(event.actor_id or '')
+        if actor_qq.startswith('qq:'):
+            actor_qq=actor_qq[3:]
         topic_query=explicit_bilibili_topic(meme_request)
         retry_pending=immediate_learning_retry(meme_request)
         pending_interest=(learning.store.next_interest(event.session_id)
@@ -93,16 +96,17 @@ class EventRouter:
         if (learning is not None and (topic_query or wants_meme or retry_pending) and event.source=='qq' and event.type=='message'
                 and event.metadata.get('platform','napcat')=='napcat'
                 and str(event.session_id or '').startswith('qq:private:')
-                and (not owner_qq or str(event.actor_id)==owner_qq)):
+                and (not owner_qq or actor_qq==owner_qq)):
+            reply_target=str(event.metadata.get('reply_target') or actor_qq)
             self.core.store.runtime_set(f'contact:{self.core.agent_id}', {
                 'session_id':event.session_id,'actor_id':event.actor_id,
-                'target':event.metadata.get('reply_target') or event.actor_id,
+                'target':reply_target,
                 'platform':'napcat','last_input_at':time.time(),'event_id':event.event_id})
             specific=bool(topic_query)
             if retry_pending and not topic_query and not wants_meme:
                 reply='我这边没有待立即执行的指定主题；把搜索词发我，我会马上按那个词学习。'
                 response=Action.create('send_message',{'session_id':event.session_id,'text':reply,'platform':'napcat'},
-                    channel='qq',target=str(event.metadata.get('reply_target') or event.actor_id),
+                    channel='qq',target=reply_target,
                     reason='说明没有待立即执行的指定学习主题')
                 delivered=await self.dispatcher.dispatch(event.event_id,response.to_dict())
                 logger.info(f'bilibili learning retry requested event_id={event.event_id} status=no_pending_topic delivered={delivered.success}')
@@ -110,9 +114,9 @@ class EventRouter:
                     'dispatched':[delivered.to_dict()],'topic_learning_request':'no_pending_topic'}
             action=Action.create('call_mcp',{'tool':'bilibili_learn_topic' if specific else 'meme_learn_now',
                 'arguments':{'query':topic_query} if specific else {},
-                'session_id':event.session_id,'reply_target':event.metadata.get('reply_target') or event.actor_id,
+                'session_id':event.session_id,'reply_target':reply_target,
                 'reply_channel':event.metadata.get('reply_channel') or 'qq','platform':'napcat'},
-                target=str(event.metadata.get('reply_target') or event.actor_id),channel='qq',
+                target=reply_target,channel='qq',
                 reason='用户明确要求立即学习指定B站主题' if specific else '用户明确要求现在学习一个B站梗')
             started=await self.dispatcher.dispatch(event.event_id,action.to_dict())
             envelope=started.result if isinstance(started.result,dict) else {}
@@ -130,7 +134,7 @@ class EventRouter:
                 reply=f'这次没能启动梗学习（{error}）。我没有记录成已学习。'
                 status='failed'
             response=Action.create('send_message',{'session_id':event.session_id,'text':reply,'platform':'napcat'},
-                channel='qq',target=str(event.metadata.get('reply_target') or event.actor_id),
+                channel='qq',target=reply_target,
                 reason='回复明确的B站梗学习请求')
             delivered=await self.dispatcher.dispatch(event.event_id,response.to_dict())
             logger.info(f'bilibili learning request handled event_id={event.event_id} kind={"topic" if specific else "meme"} pending_topic={from_pending} status={status} delivered={delivered.success}')
