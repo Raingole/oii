@@ -94,7 +94,7 @@ def parse_decision(raw: str) -> dict[str, Any]:
         # protocol. Preserve an ordinary answer as a reply; never expose a
         # truncated JSON/action payload as chat text.
         structured_markers = ('"intent"', "'intent'", '"tool"', '"arguments"', "```json", "{")
-        if text and not any(marker in text for marker in structured_markers):
+        if text and re.search(r'[\w\u3400-\u9fff]', text) and not any(marker in text for marker in structured_markers):
             return validate_decision({"intent": "reply", "message": text, "reason": "plain-text response recovered"})
         raise LLMDecisionError("invalid_json")
     if "intent" not in parsed:

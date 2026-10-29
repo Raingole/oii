@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 
-READ_TOOLS = {'check_bilibili_credentials', 'search_bilibili_videos', 'get_video_transcript', 'get_video_metadata'}
+READ_TOOLS = {'check_bilibili_credentials', 'search_bilibili_videos', 'get_video_transcript', 'get_video_metadata', 'get_video_comments'}
 
 
 def video_id(value):
@@ -85,7 +85,11 @@ class BilibiliClient:
                 if tool == 'get_video_transcript':
                     timeout = self.config.get('transcript_timeout_seconds', 180)
                 elif tool == 'search_bilibili_videos':
-                    timeout = self.config.get('search_timeout_seconds', 45)
+                    timeout = self.config.get('search_timeout_seconds', 90)
+                elif tool == 'get_video_comments':
+                    timeout = self.config.get('comments_timeout_seconds', 60)
+                elif tool == 'check_bilibili_credentials':
+                    timeout = self.config.get('credentials_timeout_seconds', 45)
                 else:
                     timeout = self.config.get('timeout_seconds', 30)
                 return await asyncio.wait_for(invoke(), timeout=max(1.0, float(timeout)))

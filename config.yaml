@@ -159,6 +159,9 @@ learning:
       timezone: Asia/Shanghai
   bilibili:
     timeout_seconds: 20
+    credentials_timeout_seconds: 45
+    search_timeout_seconds: 90
+    comments_timeout_seconds: 60
     fallback_to_asr: false
 
 # DSH tasks are proposed and executed only after one-time approval in the
