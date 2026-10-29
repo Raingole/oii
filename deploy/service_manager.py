@@ -445,6 +445,15 @@ def unit_quote(value, *, command=False):
     return '"' + value + '"'
 
 
+def unit_directory(value):
+    # WorkingDirectory is a literal path, unlike the ExecStart argument list.
+    # Its parser does not remove shell-style quotes or decode backslashes.
+    value = str(value)
+    if any(char in value for char in "\r\n\0") or value != value.strip():
+        raise ValueError("Invalid systemd working directory")
+    return value.replace("%", "%%")
+
+
 def runtime_unit(user):
     return f"""[Unit]
 Description=OII controller and companion services
@@ -456,7 +465,7 @@ StartLimitIntervalSec=0
 Type=notify
 NotifyAccess=main
 User={user}
-WorkingDirectory={unit_quote(ROOT)}
+WorkingDirectory={unit_directory(ROOT)}
 ExecStart=/usr/bin/bash {unit_quote(ROOT / 'auto-start.sh', command=True)} run
 Restart=always
 RestartSec=5
@@ -484,7 +493,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory={unit_quote(ROOT)}
+WorkingDirectory={unit_directory(ROOT)}
 ExecStart=/usr/bin/bash {unit_quote(ROOT / 'auto-update.sh', command=True)} run
 TimeoutStartSec=3600
 UMask=0077
@@ -521,9 +530,11 @@ def install_runtime(skip_deps=False):
         raise RuntimeError("Dependency preparation failed; service was not restarted")
     unit = UNIT_DIR / service_name()
     unit.write_text(runtime_unit(deployment_user()), encoding="utf-8")
+    run([executable("systemd-analyze"), "verify", unit], capture=True)
     run([executable("systemctl"), "daemon-reload"])
     run([executable("systemctl"), "enable", service_name()])
     systemctl("restart", service_name())
+    systemctl("is-active", service_name(), capture=True)
     info(f"Enabled on boot with automatic crash recovery: {service_name()}")
 
 
@@ -534,8 +545,10 @@ def install_update():
     stem, unit, timer = update_units()
     (UNIT_DIR / f"{stem}.service").write_text(unit, encoding="utf-8")
     (UNIT_DIR / f"{stem}.timer").write_text(timer, encoding="utf-8")
+    run([executable("systemd-analyze"), "verify", UNIT_DIR / f"{stem}.service", UNIT_DIR / f"{stem}.timer"], capture=True)
     run([executable("systemctl"), "daemon-reload"])
     run([executable("systemctl"), "enable", "--now", f"{stem}.timer"])
+    systemctl("is-active", f"{stem}.timer", capture=True)
     info(f"Automatic updates enabled: {stem}.timer (default: hourly)")
 
 

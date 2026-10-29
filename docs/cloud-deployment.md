@@ -49,6 +49,8 @@ MemoryCore 清单变化时安装并构建；MailPilot 源码变化时重新构�
 `auto-start.sh install` 安装 `oii.service`，在开机后启动；受管进程异常退出时，整个服务组会在 5 秒后重新拉起。
 启动时检查端口、进程和就绪状态，成功后才向 systemd 报告 READY；更新命令不会只凭进程创建就宣告启动成功。
 重复运行安装命令可以刷新服务定义；不会创建第二套重复进程。
+安装会先用 `systemd-analyze verify` 校验服务文件，再确认服务或定时器处于 active 状态后报告成功。
+若旧版生成的文件出现 `bad unit file setting`，先 `git pull --ff-only origin main` 获取修复，再重新执行两个 install 命令；此时不要先运行会尝试重启旧服务定义的更新命令。
 
 `auto-update.sh install` 安装 `oii-update.service` 和 `oii-update.timer`，默认每小时检查一次，带最多 5 分钟随机延迟。
 服务器关机期间错过的定时检查会在启动后补跑。Git 认证必须预先配置好，定时任务不会等待交互登录。

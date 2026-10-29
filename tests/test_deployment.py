@@ -118,6 +118,19 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("User=cloud-user", unit)
         self.assertIn("auto-start.sh", unit)
 
+    def test_working_directory_is_literal_and_exec_arguments_are_quoted(self):
+        from pathlib import PurePosixPath
+        root = PurePosixPath('/home/a space/100%/oii')
+        with patch.object(manager, 'ROOT', root):
+            runtime = manager.runtime_unit('root')
+            _, update, _ = manager.update_units()
+        for unit in (runtime, update):
+            line = next(value for value in unit.splitlines() if value.startswith('WorkingDirectory='))
+            self.assertEqual(line, 'WorkingDirectory=/home/a space/100%%/oii')
+            self.assertIn('ExecStart=/usr/bin/bash "/home/a space/100%%/oii/', unit)
+        with self.assertRaises(ValueError):
+            manager.unit_directory('/home/oii\nExecStart=bad')
+
     def test_update_timer_and_unit_keep_the_same_service_name(self):
         with patch.dict(os.environ, {"OII_SERVICE_NAME": "custom.service", "OII_UPDATE_CALENDAR": "daily"}):
             stem, unit, timer = manager.update_units()
@@ -150,7 +163,25 @@ class DeploymentTests(unittest.TestCase):
             prepare.side_effect = None
             manager.install_runtime()
             self.assertTrue((unit_dir / "oii.service").exists())
-            ctl.assert_called_once_with("restart", "oii.service")
+            self.assertEqual(ctl.call_args_list, [unittest.mock.call("restart", "oii.service"), unittest.mock.call("is-active", "oii.service", capture=True)])
+
+    def test_invalid_unit_does_not_enable_or_restart(self):
+        unit_dir = self.root / 'units'
+        unit_dir.mkdir()
+        with patch.object(manager, 'UNIT_DIR', unit_dir), patch.object(manager, 'linux_root'), patch.object(manager, 'deployment_user', return_value='root'), patch.object(manager, 'delegated', return_value=None), patch.object(manager, 'prepare_dependencies'), patch.object(manager, 'executable', side_effect=str), patch.object(manager, 'run', side_effect=RuntimeError('unit validation failed')), patch.object(manager, 'systemctl') as ctl:
+            with self.assertRaisesRegex(RuntimeError, 'unit validation failed'):
+                manager.install_runtime()
+            ctl.assert_not_called()
+
+    def test_failed_timer_activation_does_not_report_success(self):
+        unit_dir = self.root / 'units'
+        unit_dir.mkdir()
+        (unit_dir / 'oii.service').write_text('runtime')
+        with patch.object(manager, 'UNIT_DIR', unit_dir), patch.object(manager, 'linux_root'), patch.object(manager, 'executable', side_effect=str), patch.object(manager, 'run') as run, patch.object(manager, 'systemctl', side_effect=RuntimeError('timer inactive')), patch.object(manager, 'info') as info:
+            with self.assertRaisesRegex(RuntimeError, 'timer inactive'):
+                manager.install_update()
+            self.assertTrue(any('verify' in call.args[0] for call in run.call_args_list))
+            info.assert_not_called()
 
     def test_dead_child_prevents_ready_and_cleanup_targets_owned_process_groups(self):
         process = Mock(pid=123, returncode=7)
