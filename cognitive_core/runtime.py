@@ -110,7 +110,9 @@ class CognitiveCore:
                     goals_for_turn,
                     [m.text for m in memories],
                     event.to_dict(),
-                    [] if proactive else self.config.get("available_tools", []),
+                    ([item for item in self.config.get("available_tools", [])
+                      if self._tool_name(item) == 'bilibili_video_screenshot'] if proactive
+                     else self.config.get("available_tools", [])),
                     str(self.config.get("persona_prompt", "")),
                     history,
                     references,
@@ -229,7 +231,9 @@ class CognitiveCore:
     def _actions_from_decision(self, decision: dict[str, Any], event: CognitiveEvent) -> list[Action]:
         intent = decision.get("intent")
         if event.metadata.get('proactive_thought') and intent not in {'reply', 'wait', 'observe', 'do_nothing'}:
-            return [Action.create('do_nothing', reason='proactive thought cannot execute tools or schedules')]
+            tool = str(decision.get('tool', '') or '').strip()
+            if intent != 'tool_call' or tool != 'bilibili_video_screenshot':
+                return [Action.create('do_nothing', reason='proactive thought tool is outside the meme screenshot allowlist')]
         risk = str(decision.get("risk_level", "low") or "low")
         requires_approval = risk in {"high", "critical"}
         reason = str(decision.get("reason", "") or "LLM structured decision")

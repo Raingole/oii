@@ -128,9 +128,10 @@ class LearningService:
         self.video.kick()
         if not self.settings.get('enabled', False) or (self.task and not self.task.done()):
             return
-        if self.clock()<self.store.state('schedule').get('next_at',0):
+        meme_due=self.meme_due()
+        if self.clock()<self.store.state('schedule').get('next_at',0) and not meme_due:
             return
-        if not self.store.next_job() and not self.store.next_interest() and not self.meme_due():
+        if not self.store.next_job() and not self.store.next_interest() and not meme_due:
             return
         self.task = asyncio.create_task(self.run_once())
 
@@ -147,18 +148,20 @@ class LearningService:
                 state.update(day=day, count=0)
             minimum = max(300, float(self.settings.get('min_interval_seconds',3600)))
             maximum = max(minimum, float(self.settings.get('max_interval_seconds',10800)))
-            if now < state.get('next_at', 0):
+            job = self.store.next_job()
+            meme_scope=self.meme_scope() if not job and self.meme_due() else ''
+            interest = self.store.next_interest() if not job and not meme_scope else None
+            if now < state.get('next_at', 0) and not meme_scope:
                 return {'status':'waiting','next_at':state['next_at']}
-            if state.get('count',0) >= int(self.settings.get('max_daily_videos',6)):
+            if state.get('count',0) >= int(self.settings.get('max_daily_videos',6)) and not meme_scope:
                 return {'status':'daily_limit'}
-            job, interest = self.store.next_job(), self.store.next_interest()
-            meme_scope=self.meme_scope() if not job and not interest and self.meme_due() else ''
             if not job and not interest and not meme_scope:
                 return {'status':'no_interest'}
             if self.core.llm is None:
                 return {'status':'model_unavailable'}
-            state.update(next_at=now+random.uniform(minimum,maximum), count=state.get('count',0)+1)
-            self.store.state('schedule', state)
+            if not meme_scope:
+                state.update(next_at=now+random.uniform(minimum,maximum), count=state.get('count',0)+1)
+                self.store.state('schedule', state)
             scope = job['scope'] if job else interest['scope'] if interest else meme_scope
             if meme_scope:
                 self.reserve_meme_slot(now)

@@ -67,6 +67,8 @@ class ProactiveThinking:
             candidates.append(('open_loop', '检查最近对话中是否真有尚未收尾的问题或事情；只有确实未解决时才接着问'))
         if interest and interest.get('topic'):
             candidates.append(('known_interest', '从用户明确表达的兴趣切入：'+str(interest['topic'])[:60]))
+        if getattr(self.core, 'learning', None) is not None:
+            candidates.append(('meme_callback', '检查已收录梗里是否有与近期对话自然契合的一条；可以轻松回扣，也可以不用梗'))
         if isinstance(recent_topics,str):
             recent_topics=[recent_topics]
         cooldown=max(1,int(self.config.get('topic_cooldown_count',5)))
@@ -136,8 +138,22 @@ class ProactiveThinking:
         state.update(count=state.get('count', 0) + 1, next_at=now + self.interval(),
             last_topic=topic,recent_topics=recent_topics)
         self.core.store.runtime_set(self.key, state)
+        meme_context = ''
+        learning = getattr(self.core, 'learning', None)
+        if learning is not None:
+            try:
+                references = learning.store.search(session, '梗词', limit=10, budget=3000,
+                    data_source='bilibili_meme_transcript')
+                if references:
+                    item = self.rng.choice(references)
+                    meme_context = ('\n可选的已收录梗资料（只有和上下文自然相关时才用）：' +
+                        str({'text': item.get('text'), 'title': item.get('title'),
+                             'source': item.get('timestamp_url'), 'video': item.get('url'),
+                             'seconds': item.get('start')}))
+            except Exception:
+                meme_context = ''
         event = CognitiveEvent.create('system', 'proactive_thought', 'self', 'self',
-            {'text': f'本地时间 {local:%Y-%m-%d %H:%M}。本轮随机思考角度（只作启发，不是指定话题）：{clue}。请结合最近对话、真实记忆、当前情景和交流语气，自行生成一个有上下文的新想法；也可以判断没有自然话题并保持安静。'},
+            {'text': f'本地时间 {local:%Y-%m-%d %H:%M}。本轮随机思考角度（只作启发，不是指定话题）：{clue}。请结合最近对话、真实记忆、当前情景和交流语气，自行生成一个有上下文的新想法；也可以判断没有自然话题并保持安静。{meme_context}'},
             session_id=session, metadata={'proactive_thought': True, 'topic': topic,
                 'local_time': local.isoformat(), 'platform': 'napcat', 'reply_channel': 'qq',
                 'reply_target': contact['target'], 'user_id': contact['actor_id']})
