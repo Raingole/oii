@@ -5,10 +5,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import random
 import re
 import signal
 import time
 import uuid
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .bilibili import video_id
 
@@ -18,7 +21,7 @@ class VideoService:
         'bilibili_size_limit','bilibili_http_error','bilibili_api_error','bilibili_request_timeout',
         'video_duration_limit','video_window_limit','bilibili_wbi_unavailable','video_dependency_missing'}
     TOOLS = {'surfcore_video_info', 'surfcore_video_subtitles', 'bilibili_watch_video',
-             'video_job_status', 'qq_send_image'}
+             'video_job_status', 'qq_send_image', 'bilibili_autoshare'}
 
     def __init__(self, root, config, store, core):
         self.root, self.config, self.store, self.core = Path(root), config, store, core
@@ -26,12 +29,24 @@ class VideoService:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.sender = None
         self.task = None
+        self.auto_task = None
         with self.store.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS video_jobs (id TEXT PRIMARY KEY,scope TEXT NOT NULL,status TEXT NOT NULL,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS video_shares (scope TEXT NOT NULL,video TEXT NOT NULL,job_id TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(scope,video),UNIQUE(job_id))')
             db.execute("UPDATE video_jobs SET status='queued' WHERE status='running'")
 
     def enabled(self):
         return (self.config.get('learning', {}).get('video', {}) or {}).get('enabled', True)
+
+    def autoshare_enabled(self):
+        if not self.share_settings.get('enabled',False) or not self.enabled(): return False
+        if not hasattr(self.core,'store'): return False
+        state=self.core.store.runtime_get('bilibili_autoshare:'+self.core.agent_id)
+        return bool(state.get('enabled',True))
+
+    @property
+    def share_settings(self):
+        return ((self.config.get('learning', {}).get('video', {}) or {}).get('autoshare', {}) or {})
 
     def discover(self):
         if not self.enabled():
@@ -46,7 +61,9 @@ class VideoService:
                 {**video,'from_seconds':{'type':'number','minimum':0},'to_seconds':{'type':'number','minimum':0},'cells':{'type':'integer','enum':[9,16]}},['video']),
             tool('video_job_status','查询当前会话的视频任务，完成后返回画面笔记、编号时间和可发图的artifact_id。',{'job_id':{'type':'string'}},['job_id']),
             tool('qq_send_image','向当前NapCat QQ私聊发送图片。提供当前会话artifact_id或公开https图片url，二选一。必须以工具送达结果为准。',
-                {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}})]
+                {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}}),
+            tool('bilibili_autoshare','查看或调整按聊天兴趣自主分享B站视频；每天最多分享数由中控限制。用户要求停止时设置enabled=false。',
+                {'enabled':{'type':'boolean'}})]
 
     @staticmethod
     def route(context):
@@ -84,6 +101,32 @@ class VideoService:
         scope=str(context.get('session_id') or '')
         if not scope or not self.enabled():
             raise ValueError('video_session_required_or_disabled')
+        if name=='bilibili_autoshare':
+            if not hasattr(self.core,'store'):
+                return {'status':'unavailable'}
+            payload=(context.get('action') or {}).get('payload',{})
+            target=str(payload.get('reply_target') or '')
+            if target.startswith('qq:'): target=target[3:]
+            owner=str((self.config.get('qq') or {}).get('owner_qq') or '')
+            if payload.get('reply_channel')!='qq' or payload.get('platform')!='napcat' or scope!='qq:private:'+target or not re.fullmatch(r'\d{5,20}',target) or (owner and target!=owner):
+                raise PermissionError('owner_private_chat_required')
+            key='bilibili_autoshare:'+self.core.agent_id
+            state=self.core.store.runtime_get(key)
+            if 'enabled' not in arguments:
+                return {'enabled':bool(state.get('enabled',self.share_settings.get('enabled',False))),
+                    'count_today':int(state.get('count',0)) if state.get('day')==self.local_time(time.time()).date().isoformat() else 0,
+                    'next_at':state.get('next_at',0),'status':'enabled' if self.autoshare_enabled() else 'disabled'}
+            state['enabled']=bool(arguments.get('enabled'))
+            if state['enabled']: state['next_at']=0
+            self.core.store.runtime_set(key,state)
+            if not state['enabled']:
+                with self.store.connect() as db:
+                    rows=db.execute("SELECT id,scope,request FROM video_jobs WHERE status='queued'").fetchall()
+                    for row in rows:
+                        if json.loads(row['request']).get('autonomous'):
+                            db.execute("UPDATE video_jobs SET status='cancelled' WHERE id=?",(row['id'],))
+                            db.execute("UPDATE video_shares SET status='cancelled' WHERE job_id=?",(row['id'],))
+            return {'enabled':state['enabled'],'status':'saved'}
         if name in {'surfcore_video_info','surfcore_video_subtitles'}:
             return await self.bridge({'operation':'info' if name.endswith('_info') else 'subtitles',
                 'video':video_id(arguments.get('video',''))}, timeout=12)
@@ -144,12 +187,115 @@ class VideoService:
         return result.to_dict()
 
     def kick(self):
-        if not self.enabled() or (self.task and not self.task.done()):
+        if not self.enabled():
             return
         with self.store.connect() as db:
             exists=db.execute("SELECT 1 FROM video_jobs WHERE status='queued' LIMIT 1").fetchone()
-        if exists:
+        if exists and not (self.task and not self.task.done()):
             self.task=asyncio.create_task(self.run_queue())
+        if self.autoshare_enabled() and not (self.auto_task and not self.auto_task.done()):
+            self.auto_task=asyncio.create_task(self.auto_share_once())
+
+    def local_time(self, now):
+        name=self.share_settings.get('timezone',(self.config.get('proactive') or {}).get('timezone','Asia/Shanghai'))
+        try: zone=ZoneInfo(name)
+        except ZoneInfoNotFoundError: zone=timezone(timedelta(hours=8))
+        return datetime.fromtimestamp(now,zone)
+
+    async def auto_share_once(self):
+        """At most one grounded-interest video per day to the recent private QQ contact."""
+        if not self.sender or not hasattr(self.core,'store'):
+            return {'status':'unavailable'}
+        now=time.time();local=self.local_time(now)
+        contact=self.core.store.runtime_get(f'contact:{self.core.agent_id}')
+        if not contact or contact.get('platform')!='napcat':
+            return {'status':'no_private_contact'}
+        scope=str(contact.get('session_id') or '')
+        target=str(contact.get('target') or '')
+        if target.startswith('qq:'): target=target[3:]
+        if scope!='qq:private:'+target or not re.fullmatch(r'\d{5,20}',target):
+            return {'status':'invalid_private_contact'}
+        owner=str((self.config.get('qq') or {}).get('owner_qq') or '')
+        if owner and target!=owner:
+            return {'status':'owner_private_chat_only'}
+        if now-float(contact.get('last_input_at',0))>max(3600,float(self.share_settings.get('contact_max_age_seconds',7*86400))):
+            return {'status':'stale_private_contact'}
+        interest=self.store.next_interest(scope)
+        if not interest:
+            return {'status':'no_grounded_interest'}
+        state_key='bilibili_autoshare:'+self.core.agent_id
+        state=self.core.store.runtime_get(state_key)
+        if not bool(state.get('enabled',True)): return {'status':'disabled'}
+        if state.get('day')!=local.date().isoformat(): state={'day':local.date().isoformat(),'count':0,'attempts':0,'next_at':0,'enabled':bool(state.get('enabled',True))}
+        minimum=max(1800,float(self.share_settings.get('min_interval_seconds',3*3600)))
+        maximum=max(minimum,float(self.share_settings.get('max_interval_seconds',6*3600)))
+        if not state.get('next_at'):
+            state['next_at']=now+random.uniform(minimum,maximum)
+            self.core.store.runtime_set(state_key,state)
+            return {'status':'scheduled','next_at':state['next_at']}
+        quiet=(self.config.get('proactive') or {})
+        start=int(quiet.get('quiet_start_hour',0))%24;end=int(quiet.get('quiet_end_hour',8))%24
+        if start!=end and (start<=local.hour<end if start<end else local.hour>=start or local.hour<end):
+            if state['next_at']<=now: state['next_at']=now+1800
+            self.core.store.runtime_set(state_key,state)
+            return {'status':'quiet_hours'}
+        if now-float(contact.get('last_input_at',0))<max(300,float(self.share_settings.get('min_idle_seconds',1800))):
+            if state['next_at']<=now: state['next_at']=now+1800
+            self.core.store.runtime_set(state_key,state)
+            return {'status':'conversation_active'}
+        if int(state.get('count',0))>=max(0,int(self.share_settings.get('max_daily_shares',1))):
+            return {'status':'daily_limit'}
+        if int(state.get('attempts',0))>=max(1,int(self.share_settings.get('max_daily_attempts',3))):
+            return {'status':'daily_search_limit'}
+        with self.store.connect() as db:
+            pending=db.execute("SELECT request FROM video_jobs WHERE status IN ('queued','running')").fetchall()
+        if any(json.loads(row['request']).get('autonomous') for row in pending):
+            return {'status':'share_in_progress'}
+        if now<float(state.get('next_at',0)):
+            return {'status':'waiting','next_at':state['next_at']}
+        # Space out failed searches too, while counting only selected videos.
+        state['attempts']=int(state.get('attempts',0))+1
+        state['next_at']=now+random.uniform(minimum,maximum)
+        self.core.store.runtime_set(state_key,state)
+        try:
+            data=await self.bridge({'operation':'search','query':interest['topic']},timeout=20)
+            for candidate in data.get('videos',[])[:5]:
+                try: bvid=video_id(candidate.get('bvid',''))
+                except ValueError: continue
+                duration=self.parse_duration(candidate.get('duration'))
+                if duration is None or duration<=0 or duration>1800: continue
+                url='https://www.bilibili.com/video/'+bvid
+                if self.store.has_source(scope,url): continue
+                ident=uuid.uuid4().hex
+                route={'scope':scope,'target':target,'event_id':'bili-autoshare:'+ident}
+                title=str(candidate.get('title') or bvid)[:140]
+                caption=f"按你提过的「{interest['topic'][:60]}」找到一条视频：《{title}》。我附上了分镜抽样图；视频带字幕时也会一并参考。\n{url}\n分镜是抽样画面，不代表逐帧观看。"
+                request={'operation':'storyboard','video':bvid,'from':0,'to':min(duration,300),
+                    'cells':9,'route':route,'caption':caption,'recommendation_topic':interest['topic'][:80],
+                    'autonomous':True}
+                with self.store.connect() as db:
+                    duplicate=db.execute('SELECT 1 FROM video_shares WHERE scope=? AND video=?',(scope,bvid)).fetchone()
+                    if duplicate: continue
+                    db.execute('INSERT INTO video_shares VALUES (?,?,? ,?,?)',(scope,bvid,ident,'queued',now))
+                    db.execute("INSERT INTO video_jobs VALUES (?,?,'queued',?,'{}',?)",(ident,scope,json.dumps(request,ensure_ascii=False),now))
+                self.store.mark_interest(scope,interest['topic'],now)
+                state['count']=int(state.get('count',0))+1
+                self.core.store.runtime_set(state_key,state)
+                self.kick()
+                return {'status':'queued','topic':interest['topic'],'job_id':ident}
+            return {'status':'no_new_candidate','topic':interest['topic']}
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return {'status':'search_failed','error':str(exc) if str(exc) in self.ERRORS else type(exc).__name__}
+
+    @staticmethod
+    def parse_duration(value):
+        if isinstance(value,(int,float)) and value>0: return float(value)
+        text=str(value or '').strip()
+        if re.fullmatch(r'\d{1,2}:\d{2}(?::\d{2})?',text):
+            return sum(int(part)*60**index for index,part in enumerate(reversed(text.split(':'))))
+        return None
 
     async def run_queue(self):
         while True:
@@ -181,7 +327,10 @@ class VideoService:
                 if notes or chunks:
                     self.store.add_source(scope,result['url'],result['title'],'storyboard_sample',
                         '视频抽样分镜笔记，未经外部核实。'+notes[:1500],chunks or [{'text':notes[:1500],'start':request['from'],'end':request['to']}])
-                caption='视频分镜：'+result.get('title',request['video'])+'\n'+result.get('url','')+'\n抽样画面，不代表逐帧观看'
+                caption=request.get('caption') or ('视频分镜：'+result.get('title',request['video'])+'\n'+result.get('url','')+'\n抽样画面，不代表逐帧观看')
+                if request.get('autonomous') and not self.autoshare_enabled():
+                    self.finish(ident,'cancelled',{'status':'cancelled','reason':'autoshare_disabled'})
+                    continue
                 if request.get('route') and self.sender:
                     result['delivery']=await self.send(request['route'],ident,caption,ident)
                 self.finish(ident,'done',result)
@@ -195,6 +344,7 @@ class VideoService:
     def finish(self, ident, status, result):
         with self.store.connect() as db:
             db.execute('UPDATE video_jobs SET status=?,result=? WHERE id=?',(status,json.dumps(result,ensure_ascii=False),ident))
+            db.execute('UPDATE video_shares SET status=? WHERE job_id=?',(status,ident))
 
     async def bridge(self, request, timeout):
         settings=self.config.get('learning',{}).get('video',{}) or {}
@@ -226,6 +376,6 @@ class VideoService:
             if process.returncode is None: await process.wait()
 
     async def close(self):
-        if self.task and not self.task.done():
-            self.task.cancel()
-            await asyncio.gather(self.task,return_exceptions=True)
+        tasks=[task for task in (self.task,self.auto_task) if task and not task.done()]
+        for task in tasks: task.cancel()
+        if tasks: await asyncio.gather(*tasks,return_exceptions=True)

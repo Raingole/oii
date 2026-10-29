@@ -67,9 +67,12 @@ class KnowledgeStore:
             db.execute('INSERT INTO interests(scope,topic,evidence,updated) VALUES (?,?,?,?) ON CONFLICT(scope,topic) DO UPDATE SET evidence=excluded.evidence,updated=excluded.updated', (scope, topic[:80], evidence[:160], now or time.time()))
             db.execute('DELETE FROM interests WHERE rowid IN (SELECT rowid FROM interests WHERE scope=? ORDER BY updated DESC LIMIT -1 OFFSET 30)', (scope,))
 
-    def next_interest(self):
+    def next_interest(self, scope=None):
         with self.connect() as db:
-            row = db.execute('SELECT * FROM interests WHERE updated>? ORDER BY last_learned ASC,updated DESC LIMIT 1', (time.time() - 14 * 86400,)).fetchone()
+            if scope:
+                row = db.execute('SELECT * FROM interests WHERE scope=? AND updated>? ORDER BY last_learned ASC,updated DESC LIMIT 1', (scope,time.time()-14*86400)).fetchone()
+            else:
+                row = db.execute('SELECT * FROM interests WHERE updated>? ORDER BY last_learned ASC,updated DESC LIMIT 1', (time.time() - 14 * 86400,)).fetchone()
             return dict(row) if row else None
 
     def mark_interest(self, scope, topic, now):

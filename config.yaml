@@ -139,6 +139,16 @@ learning:
     surfcore_credentials: ""
     ffmpeg: ""
     ffprobe: ""
+    autoshare:
+      enabled: true
+      min_interval_seconds: 10800
+      max_interval_seconds: 21600
+      min_idle_seconds: 1800
+      contact_max_age_seconds: 604800
+      max_daily_shares: 1
+      max_daily_attempts: 3
+      max_daily_attempts: 3
+      timezone: Asia/Shanghai
   bilibili:
     timeout_seconds: 20
     fallback_to_asr: false
