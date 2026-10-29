@@ -45,7 +45,7 @@ def main() -> int:
     print(f"[Memory] Starting pinned MemoryCore from {MEMORY_CORE}", flush=True)
     print(f"[Memory] Config source: {CONTROLLER_CONFIG}", flush=True)
     print(f"[Memory] Data directory: {env['TDAI_DATA_DIR']}", flush=True)
-    return subprocess.call(["node", "--import", "tsx", "src/gateway/server.ts"], cwd=MEMORY_CORE, env=env)
+    return subprocess.call([os.getenv("NODE_BIN", "node"), "--import", "tsx", "src/gateway/server.ts"], cwd=MEMORY_CORE, env=env)
 
 
 if __name__ == "__main__":

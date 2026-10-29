@@ -36,7 +36,7 @@ QQ 入口只负责平台协议适配，业务处理统一进入 `QQAgent` 和公
 ## 启动
 
 ```bash
-./set-and-start.sh
+sudo bash auto-start.sh install
 ```
 
 启用 Cognitive Core 后，认知层会嵌入主中控运行，不需要另起一个 `cognitive_core` 进程。请在私有配置 `data/.config.yaml` 中填写：
@@ -50,6 +50,9 @@ cognitive_core:
 ```
 
 `persona_prompt` 是认知核心的提示词空位；`prompt` 仍用于旧 Agent Pipeline 的兼容 fallback。
+
+首次安装会准备依赖并注册 `oii.service`，支持开机自启、异常自动拉起。前台调试可用 `bash auto-start.sh run`。
+开启每小时自动更新：`sudo bash auto-update.sh install`。完整操作见 [云端部署](docs/cloud-deployment.md)。
 
 服务器运行前会读取：
 
@@ -142,8 +145,9 @@ C:\Users\你的用户名\AppData\Local\XiaozhiDesktopControl\config.json
 ## 更新
 
 ```bash
-git pull origin main
-./set-and-start.sh
+git pull --ff-only origin main
+sudo bash auto-start.sh install
+sudo bash auto-update.sh install
 ```
 
 不要把 `data/.config.yaml`、AppSecret、API Key、邮箱授权码或其他 Token 提交到 Git。
@@ -213,10 +217,11 @@ NapCat OneBot connected
 
 如果使用 QQ 官方机器人，应看到官方 Gateway 连接成功相关日志。
 
-## 版本更新
+## 后续版本更新
 
 ```bash
-git pull origin main
-source venv/bin/activate
-pip install -r requirements.txt
-./set-and-start.sh
+sudo bash auto-update.sh run
+```
+
+更新脚本只快进拉取 `origin/main`，自动建立本地部署回退标签、按变化准备依赖，并重启受管服务。
+根目录仅保留 `auto-start.sh` 和 `auto-update.sh`；旧的四个云端启动／更新脚本已删除。

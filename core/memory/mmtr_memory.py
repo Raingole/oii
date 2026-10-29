@@ -20,7 +20,7 @@ class MmtrMemoryAdapter:
         config = config or {}
         self.root = Path(__file__).resolve().parents[2]
         settings = config.get("mmtr", {})
-        self.node = str(settings.get("node", "node"))
+        self.node = str(os.environ.get("NODE_BIN") or settings.get("node", "node"))
         self.path = Path(settings.get("database", "data/memory/mmtr.db"))
         if not self.path.is_absolute():
             self.path = self.root / self.path

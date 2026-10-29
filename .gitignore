@@ -16,3 +16,6 @@ windows_notification_listener/obj/
 xiaozhi-notification-listener/
 xiaozhi-desktop-control/
 tmp/
+
+# Local deployment fingerprints and update/restart state.
+data/deploy/

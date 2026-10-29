@@ -23,8 +23,10 @@ MemoryCore data is persisted in `data/memory/tencentdb/`. Use systemd,
 Supervisor, or another process manager to keep the standalone Node process up.
 The controller remains usable in degraded mode if this service is stopped.
 
-仓库根目录的 `setup-and-start.sh` 是一键启动脚本。首次运行会安装并构建
-MemoryCore，然后启动 MemoryCore、MCP、QQ、Web UI 和中控。
+仓库根目录运行 `sudo bash auto-start.sh install` 安装自动拉起服务。
+脚本按实际配置准备和拉起本地 MemoryCore、MCP、邮件服务、Web UI 和中控；
+选择 MMTR 时不默认启动腾讯服务。自动更新使用 `sudo bash auto-update.sh install`，
+完整操作见 [云端部署](../../docs/cloud-deployment.md)。
 
 ## Controller configuration
 
