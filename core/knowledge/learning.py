@@ -96,6 +96,28 @@ class LearningService:
         self.dsh = DSHService(self.root,config,core,self.store)
         from .diary import DiaryService
         self.diary = DiaryService(config, core, self.store)
+        # Upgrade a timeout persisted by older releases. Those failures had a
+        # long scheduled next_at and were never automatically retried.
+        if (previous.get('status') == 'learning_failed'
+                and previous.get('error') == 'bilibili_request_timeout'
+                and not previous.get('retry_at') and previous.get('scope')):
+            retry_delay = max(60, float(settings.get('retry_delay_seconds', 300)))
+            retry_at = self.clock() + retry_delay
+            scope = str(previous['scope'])
+            schedule = self.store.state('schedule')
+            schedule['next_at'] = retry_at
+            schedule['count'] = max(0, int(schedule.get('count', 0)) - 1)
+            self.store.state('schedule', schedule)
+            job_id = self.store.requeue_recent_timed_out_job(scope, self.clock() - 7 * 86400)
+            pending_interest = self.store.next_interest(scope)
+            if not job_id and not pending_interest and scope == self.meme_scope() and self.meme_settings.get('enabled', False):
+                meme_schedule = self.store.state('meme_schedule')
+                meme_schedule['next_at'] = retry_at
+                meme_schedule['count'] = max(0, int(meme_schedule.get('count', 0)) - 1)
+                self.store.state('meme_schedule', meme_schedule)
+            previous['retry_at'] = retry_at
+            self.store.state('last_run', previous)
+            logger.info(f'bilibili timeout recovery scheduled scope={scope} retry_seconds={int(retry_delay)}')
 
     @property
     def settings(self):

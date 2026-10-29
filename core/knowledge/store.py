@@ -102,6 +102,15 @@ class KnowledgeStore:
         with self.connect() as db:
             db.execute('UPDATE jobs SET status=?,error=? WHERE id=?', (status, error[:100], ident))
 
+    def requeue_recent_timed_out_job(self, scope, since):
+        with self.connect() as db:
+            row = db.execute("SELECT id FROM jobs WHERE scope=? AND status='failed' AND error='bilibili_request_timeout' AND created>=? ORDER BY created DESC LIMIT 1",
+                (scope, since)).fetchone()
+            if row:
+                db.execute("UPDATE jobs SET status='queued',error='' WHERE id=?", (row['id'],))
+                return row['id']
+        return None
+
     def has_source(self, scope, url):
         with self.connect() as db:
             return db.execute('SELECT 1 FROM sources WHERE scope=? AND url=?', (scope, url)).fetchone() is not None
