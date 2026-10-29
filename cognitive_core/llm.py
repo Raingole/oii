@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from typing import Any, Protocol
 
@@ -42,8 +43,12 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
     messages = value.get("messages", [])
     if messages is None:
         messages = []
-    if not isinstance(messages, list) or len(messages) > 4 or any(not isinstance(item, str) or not item.strip() for item in messages):
-        raise ValueError("messages must contain at most four non-empty strings")
+    if not isinstance(messages, list):
+        raise ValueError("messages must be an array")
+    # DeepSeek occasionally includes an empty item or an extra split bubble.
+    # These are presentation defects, not a reason to drop an otherwise valid
+    # reply. Never coerce non-text entries into user-facing output.
+    messages = [item.strip() for item in messages if isinstance(item, str) and item.strip()][:4]
     tool = value.get("tool", "")
     if tool is None:
         tool = ""
@@ -71,10 +76,42 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_decision(raw: str) -> dict[str, Any]:
-    """Parse and validate one model response without silently accepting invalid output."""
-    parsed = parse_structured(str(raw), None, None)
+    """Parse a model decision, recovering safe conversational text only.
+
+    Tool and other action intents still require a complete, valid structured
+    decision. A malformed action response is never inferred or executed.
+    """
+    text = str(raw).strip()
+    parsed = parse_structured(text, None, None)
     if not isinstance(parsed, dict) or not parsed:
+        # A provider can occasionally answer in plain text despite the JSON
+        # protocol. Preserve an ordinary answer as a reply; never expose a
+        # truncated JSON/action payload as chat text.
+        structured_markers = ('"intent"', "'intent'", '"tool"', '"arguments"', "```json", "{")
+        if text and not any(marker in text for marker in structured_markers):
+            return validate_decision({"intent": "reply", "message": text, "reason": "plain-text response recovered"})
         raise LLMDecisionError("invalid_json")
+    if "intent" not in parsed:
+        # Infer reply only when the object contains no executable/action data.
+        # The prompt's common envelope fields are permitted only when empty.
+        action_data = (
+            bool(parsed.get("tool"))
+            or bool(parsed.get("arguments"))
+            or bool(parsed.get("goal_id"))
+            or bool(parsed.get("requires_controller_approval"))
+        )
+        message = parsed.get("message")
+        messages = parsed.get("messages")
+        has_reply = (isinstance(message, str) and bool(message.strip())) or (
+            isinstance(messages, list) and any(isinstance(item, str) and item.strip() for item in messages)
+        )
+        if not action_data and has_reply:
+            parsed = {
+                "intent": "reply",
+                "message": message if isinstance(message, str) else "",
+                "messages": messages if isinstance(messages, list) else [],
+                "reason": "reply recovered from incomplete decision",
+            }
     try:
         return validate_decision(parsed)
     except (TypeError, ValueError) as exc:
@@ -98,12 +135,34 @@ class ExistingProviderLLM:
     async def _raw_response(self, system: str, user: str, session_id: str = "") -> str:
         def call() -> str:
             if hasattr(self.provider, "response"):
-                result = self.provider.response(
+                response = self.provider.response
+                response_options: dict[str, Any] = {}
+                # Cognitive decisions include the full memory/affect envelope.
+                # The general chat cap (often 500 tokens) can truncate that JSON
+                # before its closing delimiter, especially on tool-rich turns.
+                # Raise the cap only for providers that advertise kwargs or an
+                # explicit max_tokens parameter; other provider APIs stay intact.
+                try:
+                    parameters = inspect.signature(response).parameters.values()
+                    accepts_max_tokens = any(
+                        parameter.name == "max_tokens" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                        for parameter in parameters
+                    )
+                except (TypeError, ValueError):
+                    accepts_max_tokens = False
+                if accepts_max_tokens:
+                    configured_cap = getattr(self.provider, "max_tokens", None)
+                    try:
+                        response_options["max_tokens"] = max(1200, int(configured_cap or 0))
+                    except (TypeError, ValueError):
+                        response_options["max_tokens"] = 1200
+                result = response(
                     session_id,
                     [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
+                    **response_options,
                 )
                 return "".join(str(part) for part in result)
             if hasattr(self.provider, "response_no_stream"):
