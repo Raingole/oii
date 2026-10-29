@@ -38,19 +38,28 @@ def clean_interests(value, text):
     return result
 
 
-def topic_title_relevance(topic, title):
-    """Return a conservative lexical relevance score for a Bilibili result title."""
+def topic_title_relevance(topic, title, context=''):
+    """Return a conservative lexical relevance score for a Bilibili result."""
     query = str(topic or '').lower()
     query = re.sub(r'^(?:b站|哔哩哔哩)', '', query)
     query = re.sub(r'(?:这个|那个)?(?:相关)?(?:网络)?梗(?:视频|出处|是什么|的)?$', '', query)
     query = re.sub(r'^(?:搜索|查找|学习|主题|关键词)', '', query)
     query = re.sub(r'^[的关于]+|[的相关]+$', '', query)
     query = re.sub(r'[^\w\u3400-\u9fff]+', '', query)
-    candidate = re.sub(r'[^\w\u3400-\u9fff]+', '', str(title or '').lower())
+    candidate = re.sub(r'[^\w\u3400-\u9fff]+', '', (str(title or '')+' '+str(context or '')).lower())
     if len(query) < 2 or not candidate:
         return 0.0
     if query in candidate:
         return 1.0
+    # For mixed-language phrases, matching only the Latin part is too weak:
+    # e.g. “token来” must not match every unrelated title containing “token”.
+    latin_terms = re.findall(r'[a-z0-9_]{2,}', query)
+    chinese = ''.join(re.findall(r'[\u3400-\u9fff]+', query))
+    if latin_terms and chinese:
+        if not any(term in candidate for term in latin_terms):
+            return 0.0
+        if not set(chinese).issubset(set(candidate)):
+            return 0.0
     if len(query) <= 3:
         return 0.0
     bigrams = {query[index:index + 2] for index in range(len(query) - 1)}
@@ -404,7 +413,8 @@ class LearningService:
         topic=str(interest['topic']).strip()
         normalized=re.sub(r'^(?:B站|哔哩哔哩)\s*','',topic).strip()
         broad=re.sub(r'(?:相关)?(?:网络)?梗$','',normalized).strip()
-        queries=list(dict.fromkeys(query for query in (topic,normalized,broad) if len(query)>=2))
+        queries=list(dict.fromkeys(query for query in (topic,normalized,broad,
+            f'{broad} 视频',f'{broad} 解释') if len(query)>=2))
         candidates=[]
         seen=set()
         relevant_found=False
@@ -419,7 +429,12 @@ class LearningService:
                     continue
                 if ident not in seen:
                     seen.add(ident)
-                    score=topic_title_relevance(topic,video.get('title'))
+                    tags=video.get('tags',[])
+                    if isinstance(tags,list):
+                        tags=' '.join(str(item.get('tag_name') or item.get('name') or item.get('tag') or '')
+                            if isinstance(item,dict) else str(item) for item in tags)
+                    context=' '.join(str(video.get(key) or '') for key in ('description','desc','subtitle'))+' '+str(tags)
+                    score=topic_title_relevance(topic,video.get('title'),context)
                     if score >= 0.55:
                         relevant_found=True
                         candidates.append((score,video))
