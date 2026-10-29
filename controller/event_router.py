@@ -87,6 +87,53 @@ class EventRouter:
             logger.info(f'dsh install request handled event_id={event.event_id} status={status} delivered={delivery.success}')
             return {'event_id':event.event_id,'actions':[action.to_dict()],
                 'dispatched':[delivery.to_dict()],'dsh_install_request':status}
+        dsh_connectivity_request=(
+            re.search(r'dsh',install_request,re.I)
+            and re.search(r'(?:api|接口|模型|连接|连通|联网|可用)',install_request,re.I)
+            and re.search(r'(?:查看|检查|测试|验证|确认|查一下|看看|测一下)',install_request)
+        )
+        if (dsh is not None and dsh_connectivity_request and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')):
+            status='approval_required'
+            if not dsh.enabled:
+                reply='DSH 接入目前处于关闭状态，没有发起 API 检查。'
+                status='disabled'
+            elif not dsh.binary_path():
+                reply='DSH 命令行工具尚未安装，无法检查 API 连通性；没有运行任务。请先单独请求安装 DSH 运行时。'
+                status='runtime_missing'
+            else:
+                try:
+                    prepared=await dsh.execute('dsh_prepare',{
+                        'operation':'run',
+                        'task':('通过当前 DSH 配置执行一次 API 连通性自检，只请求模型回复“DSH API 连通”。'
+                            '不要调用工具、读取或修改文件、安装插件、更改配置，也不要显示 API Key。'),
+                        'rationale':'主人在 QQ 私聊中明确要求检查 DSH API 是否连通。'},
+                        {'session_id':event.session_id,'actor_id':event.actor_id,
+                         'action':{'target':event.actor_id,'payload':{}}})
+                    if prepared.get('status')=='approval_required':
+                        reply=(f"DSH API 连通性检查已建立，尚未启动。\n任务：{prepared['display_task']}\n"
+                            f"理由：{prepared['rationale']}\n回复“同意 {prepared['approval_code']}”执行，"
+                            f"或回复“拒绝 {prepared['approval_code']}”取消。确认码 10 分钟内有效。")
+                        status='approval_required'
+                    else:
+                        reply='暂时无法建立 DSH API 检查请求；没有运行任务。'
+                        status=str(prepared.get('status') or 'unavailable')
+                except PermissionError:
+                    reply='DSH API 检查仅接受已绑定主人的 QQ 私聊；没有运行任务。'
+                    status='owner_only'
+                except Exception as exc:
+                    logger.warning(f'dsh connectivity request preparation failed event_id={event.event_id} error_type={type(exc).__name__}')
+                    reply='暂时无法建立 DSH API 检查请求；没有运行任务，请稍后再试。'
+                    status='failed'
+            action=Action.create('send_message',{'session_id':event.session_id,
+                'text':reply,'platform':'napcat'},
+                channel=str(event.metadata.get('reply_channel') or 'qq'),
+                target=str(event.metadata.get('reply_target') or event.actor_id))
+            delivery=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+            logger.info(f'dsh connectivity request handled event_id={event.event_id} status={status} delivered={delivery.success}')
+            return {'event_id':event.event_id,'actions':[action.to_dict()],
+                'dispatched':[delivery.to_dict()],'dsh_connectivity_request':status}
         # A short affirmative can accept the *proposal to prepare a request*, but
         # it must never authorize execution. Create the normal one-time code so
         # the owner can review the exact, bounded task before anything runs.
