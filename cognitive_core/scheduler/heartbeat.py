@@ -30,6 +30,8 @@ class HeartbeatScheduler:
             result["scheduled_results"] = [x.to_dict() for x in await self.dispatcher.process_due_schedules()]
             result["retry_results"] = [x.to_dict() for x in await self.dispatcher.process_due_retries()]
             result['proactive'] = await self.proactive.run_once()
+            if getattr(self.core,'learning',None):
+                self.core.learning.kick()
         return result
 
     async def _run(self) -> None:

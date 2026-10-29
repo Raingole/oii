@@ -47,6 +47,8 @@ class QQGateway:
         self.self_id: Optional[str] = None
         self.recent_message_ids: set[str] = set()
         self.pending_actions: dict[str, asyncio.Future] = {}
+        from .event_tasks import EventTasks
+        self.event_tasks=EventTasks(lambda message:self.logger.bind(tag=TAG).warning(message))
 
     @property
     def delivery_mode(self) -> str:
@@ -83,6 +85,7 @@ class QQGateway:
 
     async def close(self) -> None:
         self.stop_event.set()
+        await self.event_tasks.close()
         if self.websocket is not None and not self.websocket.closed:
             await self.websocket.close()
         self.websocket = None
@@ -146,7 +149,7 @@ class QQGateway:
             async for message in ws:
                 if message.type == WSMsgType.TEXT:
                     try:
-                        await self._handle_payload(message.data)
+                        await self.event_tasks.feed(message.data,self._handle_payload)
                     except Exception as exc:
                         # Isolate malformed or failed events; keep the reverse
                         # WebSocket available for the next OneBot event.
@@ -238,9 +241,19 @@ class QQGateway:
         allowed = self.qq_config.get("allowed_users", [])
         if allowed and message.user_id not in {str(item) for item in allowed}:
             return
+        for image in message.images:
+            if not image.get('url') and image.get('file') and not image['file'].startswith(('https://','http://','data:','base64://')):
+                try:
+                    image_info=await self.send_action('get_image',{'file':image['file']},timeout=5)
+                    data=image_info.get('data',{}) if isinstance(image_info,dict) else {}
+                    if data.get('url'):
+                        image['url']=str(data['url'])
+                except Exception:
+                    pass
         self.logger.bind(tag=TAG).info(f"QQ private message received: user_id={message.user_id}, message_id={message.message_id}")
         self.logger.bind(tag=TAG).info(f"QQ pipeline dispatch: session={message.session_key}, text_length={len(message.message)}")
-        reply = await self.agent.reply_result(message.session_key, message.message, message.message_id or "") if hasattr(self.agent, "reply_result") else None
+        image_meta = {'event_metadata':{'images':message.images}} if message.images else {}
+        reply = await self.agent.reply_result(message.session_key, message.message, message.message_id or "", **image_meta) if hasattr(self.agent, "reply_result") else None
         answer = reply.text if reply else await self.agent.reply(message.session_key, message.message, message.message_id or "")
         self.logger.bind(tag=TAG).info(f"QQ pipeline completed: session={message.session_key}, reply_length={len(answer or '')}")
         if not (reply and (reply.handled_by_cognitive or reply.delivery_attempted)):

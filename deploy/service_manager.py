@@ -234,7 +234,21 @@ def prepare_dependencies(*, skip_python=False):
     config = load_config(python)
     mmtr = selected_memory_backend(config) == "mmtr"
     use_tencent = start_tencent(config)
-    node = node_check(config) if mmtr or use_tencent else None
+    use_bilibili = bool((config.get('learning',{}) or {}).get('enabled',False))
+    node = node_check(config) if mmtr or use_tencent or use_bilibili else None
+    if use_bilibili:
+        folder = ROOT / 'deploy/bilibili'
+        wanted = fingerprint([folder / 'package.json',folder / 'package-lock.json'],'bilibili-mcp')
+        if stamp.get('bilibili-mcp') != wanted or not (folder / 'node_modules/@xzxzzx/bilibili-mcp/dist/cli.js').is_file():
+            environment = {**os.environ,'PATH':str(Path(node).parent)+os.pathsep+os.environ.get('PATH','')}
+            npm = shutil.which(os.environ.get('NPM_BIN','npm'),path=environment['PATH'])
+            if not npm:
+                raise RuntimeError('npm not found; set NPM_BIN alongside NODE_BIN in .env')
+            info('Preparing read-only Bilibili learning integration')
+            run([npm,'ci','--ignore-scripts','--omit=dev','--no-audit','--no-fund'],cwd=folder,env=environment)
+            stamp['bilibili-mcp'] = wanted
+            write_json(stamp_path,stamp)
+            changed = True
     if use_tencent:
         folder = ROOT / "TencentDB-Agent-Memory/MemoryCore"
         wanted = fingerprint([folder / "package.json", folder / "package-lock.json"], "memory-core")

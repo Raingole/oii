@@ -12,6 +12,7 @@
 - MCP 能力：支持 WebSocket MCP 服务和 MCP 聚合器，可扩展天气、新闻、路线、餐厅等工具。
 - 长期记忆：支持服务端记忆后端，并支持 QQ / ESP 用户身份映射。
 - MMTR 仿人脑记忆：默认优先使用的零依赖 Node/SQLite 记忆层（暂不启用腾讯记忆），支持三通道遗忘、联想网络、六维关系和不可淡忘的承诺，见 [模块说明](mmtr/README.md) 与 [接入指南](docs/mmtr-integration.md)。
+- B站自学与图片理解：按聊天兴趣读取字幕、保存来源知识并召回；支持 QQ 图片／表情包理解。见 [接入说明](docs/learning-and-vision.md) 和 [任务清单](docs/tasks.md)。
 - 多条回复与随机主动聊天：NapCat 支持自然分条，按时间和同会话历史随机联想，详见 [配置说明](docs/conversation-initiative.md)。
 - MMTR 记忆观察台：打开 `/memory.html`，查看当前对话实际召回的记忆、关联词句和思维核心引用，支持会话历史与实时刷新，见 [使用说明](docs/mmtr-observer.md)。
 - 辅助服务：OTA、视觉分析、短信验证码和邮件验证码通知。

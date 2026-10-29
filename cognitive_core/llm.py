@@ -52,6 +52,11 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
         "message": str(message),
         "messages": [item.strip() for item in messages],
         "memory_observation": clean_observation(value.get('memory_observation')),
+        "learning_interests": [
+            {'topic':item['topic'][:60], 'evidence':item['evidence'][:160]}
+            for item in (value.get('learning_interests') if isinstance(value.get('learning_interests'),list) else [])[:2]
+            if isinstance(item,dict) and isinstance(item.get('topic'),str) and isinstance(item.get('evidence'),str)
+        ],
         "tool": str(tool),
         "arguments": args,
         "risk_level": risk,

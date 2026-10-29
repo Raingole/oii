@@ -18,6 +18,17 @@ spec.loader.exec_module(manager)
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_learning_runtime_is_pinned_installed_without_scripts_and_fingerprinted(self):
+        folder=self.root/'deploy/bilibili';folder.mkdir(parents=True)
+        (folder/'package.json').write_text('{"dependencies":{"@xzxzzx/bilibili-mcp":"1.14.5"}}')
+        (folder/'package-lock.json').write_text('{}')
+        entry=folder/'node_modules/@xzxzzx/bilibili-mcp/dist/cli.js'
+        entry.parent.mkdir(parents=True);entry.write_text('// fixture')
+        with patch.dict(os.environ,{'INSTALL_PYTHON_DEPS':'0'}), patch.object(manager,'python_bin',return_value='python'), patch.object(manager,'load_config',return_value={'learning':{'enabled':True}}), patch.object(manager,'node_check',return_value=str(self.root/'node')), patch.object(manager.shutil,'which',return_value='npm'), patch.object(manager,'mail_enabled',return_value=False), patch.object(manager,'run') as run:
+            self.assertTrue(manager.prepare_dependencies())
+            self.assertFalse(manager.prepare_dependencies())
+            self.assertEqual(run.call_count,1)
+            self.assertEqual(run.call_args.args[0],['npm','ci','--ignore-scripts','--omit=dev','--no-audit','--no-fund'])
     def test_preparation_uses_updated_checkout_in_fresh_process(self):
         folder = self.root / 'deploy'
         folder.mkdir()

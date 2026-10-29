@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import time
+import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,7 @@ class CognitiveCore:
         self.agent_id = agent_id; self.store = StateStore(db_path); self.memory = memory or InMemoryAdapter()
         self.self_model: SelfModel = self.store.load_self(agent_id, self.seed)
         self.llm = None
+        self.learning = self.knowledge = self.vision = None
         self.goals: list[dict[str, Any]] = self.self_model.active_goals
         self.processed_events: set[str] = set()
         self.last_tick: dict[str, Any] = {}
@@ -41,7 +44,14 @@ class CognitiveCore:
     async def process_event(self, event: CognitiveEvent) -> dict[str, Any]:
         if event.event_id in self.processed_events or not self.store.claim_event(event.event_id):
             return {"event_id": event.event_id, "duplicate": True, "actions": []}
-        self.store.put("events", event.event_id, event.to_dict()); self.processed_events.add(event.event_id)
+        self.processed_events.add(event.event_id)
+        images = event.content.get('images') or event.metadata.get('images') or []
+        if isinstance(images,list) and images:
+            visual = await self.vision.describe_many(event.session_id,images) if self.vision else [{'status':'unavailable','error':'vision_provider_not_configured'}]
+            metadata = {key:value for key,value in event.metadata.items() if key!='images'}
+            content = {key:value for key,value in event.content.items() if key!='images'}
+            event = replace(event,content={**content,'visual_context':visual,'image_count':min(3,len(images))},metadata=metadata)
+        self.store.put("events", event.event_id, event.to_dict())
         proactive = bool(event.metadata.get('proactive_thought'))
         if event.source == 'qq' and event.type == 'message' and event.content.get('text') and event.session_id.startswith('qq:private:') and event.metadata.get('platform', 'napcat') == 'napcat':
             self.store.runtime_set(f'contact:{self.agent_id}', {
@@ -57,6 +67,12 @@ class CognitiveCore:
             "team_id": event.metadata.get("team_id", self.config.get("team_id", "personal")),
         }
         memories = await self.memory.search(str(event.content.get("text", event.type)), top_k=int(self.config.get("memory_top_k", 8)), context_budget=int(self.config.get("memory_context_budget", 4000)), **identity)
+        references = []
+        if self.knowledge:
+            try:
+                references = await asyncio.to_thread(self.knowledge.search,event.session_id,str(event.content.get('text','')))
+            except Exception:
+                logger.warning(f'knowledge retrieval failed event_id={event.event_id}')
         # Conversation context is short-lived working state, not long-term
         # memory.  Rebuild it from SQLite so restart/send-failure does not
         # erase the meaning of the previous turn.
@@ -97,6 +113,7 @@ class CognitiveCore:
                     [] if proactive else self.config.get("available_tools", []),
                     str(self.config.get("persona_prompt", "")),
                     history,
+                    references,
                 )
                 llm = self.llm
                 if not hasattr(llm, "decide"):
@@ -132,6 +149,11 @@ class CognitiveCore:
                 decision = None
                 actions = [Action.create('do_nothing', reason='proactive generation failed')] if proactive else self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
                 logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
+        if self.learning and llm_used:
+            try:
+                self.learning.observe(event,decision)
+            except Exception:
+                logger.warning(f'learning interest capture failed event_id={event.event_id}')
         memory_policy = 'discard' if proactive else should_store(event, app)
         # Technical action_result events are evidence for the action log, not
         # user dialogue. Do not manufacture "用户：action_result" memories.
@@ -179,6 +201,8 @@ class CognitiveCore:
             try:
                 activity = build_activity(event, memories, meaning_result, goals_for_turn, actions, decision, llm_used, backend)
                 activity["generation"] = generation
+                activity['knowledge_refs'] = references
+                activity['visual_context'] = event.content.get('visual_context',[])
                 self.store.save_memory_activity(activity)
             except Exception:
                 logger.warning(f"memory observer capture failed event_id={event.event_id}")
@@ -270,7 +294,7 @@ class CognitiveCore:
                 arguments = {}
             return [Action.create(
                 "call_mcp",
-                {"tool": tool, "arguments": arguments},
+                {"tool": tool, "arguments": arguments, "session_id": event.session_id},
                 risk_level=risk,
                 reason=reason,
                 requires_controller_approval=requires_approval,

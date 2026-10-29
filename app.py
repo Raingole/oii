@@ -133,6 +133,9 @@ async def main():
         catalog.register("plugins", _DynamicProvider(lambda: getattr(getattr(_context(), "func_handler", None), "tool_manager", None), _context))
         catalog.register("desktop", _DynamicProvider(lambda: getattr(ws_server, "desktop_control", None)))
         catalog.register("servo", servo_server)
+        if ws_server.cognitive_runtime and ws_server.cognitive_runtime.learning:
+            catalog.register('learning',ws_server.cognitive_runtime.learning)
+            ws_server.cognitive_runtime.core.config.setdefault('available_tools',[]).extend(await ws_server.cognitive_runtime.learning.discover())
         tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))
         async def _esp_executor(action):
             target = str(action.get("target") or action.get("payload", {}).get("device_id") or "")
@@ -150,7 +153,7 @@ async def main():
         async def _mcp_executor(action):
             payload = action.get("payload", {})
             tool_name = str(payload.get("tool", "")); arguments = payload.get("arguments", {})
-            result = await tool_executor.execute(tool_name, arguments, {"action": action, "event_id": action.get("event_id", ""), "approval_validated": bool(action.get("_approval_validated"))})
+            result = await tool_executor.execute(tool_name, arguments, {"action": action, "event_id": action.get("event_id", ""), "session_id":payload.get('session_id',''), "approval_validated": bool(action.get("_approval_validated"))})
             if not result.get("success"): raise RuntimeError(result.get("error", "tool failed"))
             return result
         ws_server.action_dispatcher.register("call_mcp", _mcp_executor)

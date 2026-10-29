@@ -159,6 +159,9 @@ class QQAgent:
                             "description": function.get("description") or tool.get("description", ""),
                             "parameters": function.get("parameters") or tool.get("parameters", {}),
                         })
+                    learning = getattr(getattr(self.controller,'cognitive_runtime',None),'learning',None)
+                    if learning:
+                        tools.extend(await learning.discover())
                     self.controller.event_router.core.config["available_tools"] = tools
                     self.logger.bind(tag=TAG).info(f"Cognitive tool catalog refreshed: {len(tools)} tools")
             except Exception as exc:

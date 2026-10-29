@@ -17,6 +17,14 @@ class ControllerRuntime:
         db_path = str(cc.get("db_path", "data/cognitive/cognitive.db"))
         memory = LegacyMemoryPort(legacy_memory, str(config.get("owner_id", "owner"))) if legacy_memory is not None and (getattr(legacy_memory, "using_mmtr", False) or cc.get("share_legacy_memory", True)) else InMemoryAdapter()
         self.core = CognitiveCore(db_path=db_path, agent_id=str(cc.get("agent_id", "central-controller")), memory=memory, config=cc)
+        self.learning = None
+        if (config.get('learning',{}) or {}).get('enabled',False) or (config.get('visual_understanding',{}) or {}).get('enabled',False):
+            from core.knowledge.learning import LearningService
+            from core.knowledge.vision import VisualUnderstanding
+            self.learning = LearningService(Path(__file__).resolve().parents[1],config,self.core)
+            self.core.learning = self.learning
+            self.core.knowledge = self.learning.store
+            self.core.vision = VisualUnderstanding(config,self.learning.store)
         self.outbox = ActionOutbox(db_path)
         self.approval = ApprovalService(db_path)
         self.dispatcher = ActionDispatcher(self.outbox, approval=self.approval, max_attempts=int(cc.get("action_max_attempts", 3)), timeout=float(cc.get("action_timeout", 15)))
@@ -41,6 +49,8 @@ class ControllerRuntime:
         self.lifecycle_trace.append("stop_accepting")
         self.dispatcher.stop_accepting(); self.lifecycle_trace.append("heartbeat_stop"); await self.scheduler.stop()
         self.lifecycle_trace.append("outbox_idle"); await self.dispatcher.wait_for_idle()
+        if self.learning:
+            await self.learning.close()
 
     def health(self) -> dict[str, Any]:
         return {"controller_bridge": self.controller_available, "action_outbox": True, "sqlite": self.core.store.path.exists(), "memory": not getattr(self.core.memory, "degraded", False)}

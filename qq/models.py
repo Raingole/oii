@@ -1,6 +1,6 @@
 """Small, protocol-focused OneBot models used by the QQ gateway."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
@@ -20,6 +20,7 @@ class QQMessage:
     sender: Any = None
     time: Any = None
     self_id: Optional[str] = None
+    images: list[dict] = field(default_factory=list)
 
     @property
     def session_key(self) -> str:
@@ -40,13 +41,15 @@ class QQMessage:
             sender=event.get("sender"),
             time=event.get("time"),
             self_id=_string_id(event.get("self_id")),
+            images=_extract_images(event.get('message')),
         )
 
 
 def _extract_text(message: Any, raw_message: Any) -> str:
     """Extract supported text segments and safely describe unsupported ones."""
     if isinstance(message, str):
-        return message.strip()
+        import re
+        return re.sub(r'\[CQ:image,[^\]]+\]','[图片]',message).strip()
     if isinstance(message, list):
         parts = []
         for segment in message:
@@ -54,8 +57,29 @@ def _extract_text(message: Any, raw_message: Any) -> str:
                 continue
             if segment.get("type") == "text":
                 parts.append(str(segment.get("data", {}).get("text", "")))
-            elif segment.get("type") in {"image", "file", "record", "video", "forward"}:
+            elif segment.get('type') == 'image':
+                parts.append('[图片]')
+            elif segment.get("type") in {"file", "record", "video", "forward"}:
                 parts.append(f"[不支持的{segment.get('type')}消息]")
         return "".join(parts).strip()
     return str(raw_message or "").strip()
+
+
+def _extract_images(message):
+    if isinstance(message,list):
+        result=[]
+        for segment in message:
+            if isinstance(segment,dict) and segment.get('type')=='image' and isinstance(segment.get('data'),dict):
+                data=segment['data']
+                result.append({key:str(data[key]) for key in ('url','file','summary','sub_type') if key in data})
+        return result[:3]
+    if isinstance(message,str):
+        import re
+        result=[]
+        for match in re.finditer(r'\[CQ:image,([^\]]+)\]',message):
+            fields=dict(item.split('=',1) for item in match[1].split(',') if '=' in item)
+            if fields.get('url') or fields.get('file'):
+                result.append({key:value.replace('&#44;',',').replace('&amp;','&') for key,value in fields.items() if key in {'url','file','summary'}})
+        return result[:3]
+    return []
 

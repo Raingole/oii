@@ -125,6 +125,25 @@ cognitive_core:
   # 在这里填写 Cognitive Core 的人格提示词；留空则只使用结构化 Self Model。
   persona_prompt: ""
 
+# Source-backed learning follows interests grounded in current user dialogue.
+learning:
+  enabled: true
+  database: data/knowledge/knowledge.db
+  min_interval_seconds: 3600
+  max_interval_seconds: 10800
+  max_daily_videos: 6
+  max_video_seconds: 1800
+  bilibili:
+    timeout_seconds: 20
+    fallback_to_asr: false
+
+visual_understanding:
+  enabled: true
+  max_images_per_message: 2
+  timeout_seconds: 25
+  # Explicitly list a local asset host only if QQ serves images from it.
+  trusted_image_hosts: []
+
 # Android SMS webhook. The target falls back to qq.owner_qq when empty.
 # Prefer setting SMS_WEBHOOK_TOKEN and SMS_TARGET_QQ in the server environment.
 sms:

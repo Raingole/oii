@@ -21,3 +21,5 @@ tmp/
 data/deploy/
 data/memory/
 data/cognitive/
+data/knowledge/
+deploy/bilibili/node_modules/

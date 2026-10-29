@@ -1,0 +1,7 @@
+{
+  "name": "oii-bilibili-integration",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned upstream read-only Bilibili MCP runtime for OII",
+  "dependencies": {"@xzxzzx/bilibili-mcp": "1.14.5"}
+}
