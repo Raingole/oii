@@ -105,7 +105,7 @@ class QQGateway:
         commonly separate containers, while the reverse socket is the shared
         authenticated two-way transport.
         """
-        params = {"user_id": str(user_id), "message": str(message)}
+        params = {"user_id": str(user_id), "message": message if isinstance(message,list) else str(message)}
         websocket_available = self.websocket is not None and not self.websocket.closed
 
         if self.delivery_mode != "http" and websocket_available:

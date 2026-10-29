@@ -249,6 +249,11 @@ def prepare_dependencies(*, skip_python=False):
             stamp['bilibili-mcp'] = wanted
             write_json(stamp_path,stamp)
             changed = True
+    if use_bilibili and ((config.get('learning',{}).get('video',{}) or {}).get('enabled',True)):
+        settings = config.get('learning',{}).get('video',{}) or {}
+        missing = [name for name in ('ffmpeg','ffprobe') if not shutil.which(settings.get(name) or name)]
+        if missing:
+            info('Video storyboard needs '+', '.join(missing)+'; install with sudo apt-get install -y ffmpeg')
     if use_tencent:
         folder = ROOT / "TencentDB-Agent-Memory/MemoryCore"
         wanted = fingerprint([folder / "package.json", folder / "package-lock.json"], "memory-core")

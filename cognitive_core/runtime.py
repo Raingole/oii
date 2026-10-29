@@ -294,7 +294,12 @@ class CognitiveCore:
                 arguments = {}
             return [Action.create(
                 "call_mcp",
-                {"tool": tool, "arguments": arguments, "session_id": event.session_id},
+                {"tool": tool, "arguments": arguments, "session_id": event.session_id,
+                 "reply_target": self._reply_target(event),
+                 "reply_channel": event.metadata.get("reply_channel") or event.source,
+                 "platform": event.metadata.get("platform", event.source)},
+                target=self._reply_target(event),
+                channel=str(event.metadata.get("reply_channel") or event.source),
                 risk_level=risk,
                 reason=reason,
                 requires_controller_approval=requires_approval,

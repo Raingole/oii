@@ -1,0 +1,8 @@
+# Upstream provenance
+
+- `vendor/storyboard`: [SAOS-3624/dsh-video-storyboard](https://github.com/SAOS-3624/dsh-video-storyboard/tree/422c44d3354eedb236c28c29f213c96abc28a1c2), commit `422c44d3354eedb236c28c29f213c96abc28a1c2`, MIT. Source files (one trailing blank line normalized in asr-lifecycle.js), package metadata, LICENSE, NOTICE and CREDITS are preserved. OII calls the native pipeline rather than its DSH plugin entry point. No upstream install scripts run.
+- `surfcore.mjs`: adapted from [Mieksido/surfcore](https://github.com/Mieksido/surfcore/tree/d7f6b33d57b1667508c48206cbcc455815d6d336), commit `d7f6b33d57b1667508c48206cbcc455815d6d336`, `plugins/surfcore/tools/commands/{search,subtitles,bili-watch}.mjs`. MIT notice retained in source and full upstream LICENSE included in `vendor/surfcore/LICENSE`.
+
+OII changes: structured responses, reuse Bilibili MCP credentials, explicit optional SurfCore account selection, allowlisted HTTPS endpoints with pinned public IPv4 resolution, streaming download size and time caps, bounded video windows, controller-owned artifacts, asynchronous jobs, and NapCat output. SurfCore's Windows browser bridge, personality, public posting automation, SnowLuma dependencies and installer are not included.
+
+External executables: Node >=22.13, FFmpeg and ffprobe. No yt-dlp, ASR service or OCR runtime is required for this adapter. It supports Bilibili single-file MP4 playback responses; DASH-only and multipart streams return a failure. Thumbnail frames and subtitles are samples, not a guarantee of full-video comprehension. Image token cost depends on the selected model.

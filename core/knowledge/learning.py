@@ -64,6 +64,8 @@ class LearningService:
         self.client = client or BilibiliClient(root, settings.get('bilibili', {}))
         self.task = None
         self.lock = asyncio.Lock()
+        from .video import VideoService
+        self.video = VideoService(self.root,config,self.store,core)
 
     @property
     def settings(self):
@@ -82,6 +84,7 @@ class LearningService:
             self.store.interest(event.session_id, item['topic'], item['evidence'], self.clock())
 
     def kick(self):
+        self.video.kick()
         if not self.settings.get('enabled', False) or (self.task and not self.task.done()):
             return
         state = self.store.state('schedule')
@@ -198,9 +201,11 @@ class LearningService:
         return [tool('bilibili_search','按主题搜索B站视频，只读，需要已登录。',{'query':{'type':'string'}},['query']),
             tool('bilibili_learn_video','把一个BV视频加入本地知识学习队列，稍后读取字幕并写来源笔记。',{'video':{'type':'string'}},['video']),
             tool('knowledge_search','检索当前会话的已学知识，返回视频来源与时间点。',{'query':{'type':'string'}},['query']),
-            tool('learning_status','查看当前会话的知识库数量、学习任务与上次运行状态。',{})]
+            tool('learning_status','查看当前会话的知识库数量、学习任务与上次运行状态。',{})] + self.video.discover()
 
     async def execute(self,name,arguments,context):
+        if name in self.video.TOOLS:
+            return await self.video.execute(name,arguments,context)
         scope = str(context.get('session_id') or '')
         if not scope:
             raise ValueError('learning_session_required')
@@ -221,6 +226,7 @@ class LearningService:
         raise ValueError('unknown_learning_tool')
 
     async def close(self):
+        await self.video.close()
         if self.task and not self.task.done():
             self.task.cancel()
             await asyncio.gather(self.task,return_exceptions=True)

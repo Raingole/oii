@@ -104,7 +104,16 @@ async def main():
             if action.get("payload", {}).get("platform") == "official":
                 await qq_official_gateway._send_c2c_message(user_id, str(action.get("payload", {}).get("text", "")), str(action.get("payload", {}).get("source_message_id", "")))
                 return {"status": "completed", "output_sent": True, "channel": "qq_official"}
-            sent = await qq_gateway.send_private_message(user_id, str(action.get("payload", {}).get("text", "")))
+            payload = action.get("payload", {})
+            message = str(payload.get("text", ""))
+            if payload.get('image_artifact'):
+                from qq.media import image_segments
+                learning = getattr(ws_server.cognitive_runtime, 'learning', None)
+                if not learning:
+                    raise RuntimeError('Video artifact provider unavailable')
+                image = learning.video.artifact(str(payload.get('session_id','')),str(payload['image_artifact']))
+                message = image_segments(image.read_bytes(),message)
+            sent = await qq_gateway.send_private_message(user_id, message)
             if not sent:
                 raise RuntimeError("NapCat message delivery failed")
             return {"status": "completed", "output_sent": True, "channel": "napcat"}
@@ -135,6 +144,7 @@ async def main():
         catalog.register("servo", servo_server)
         if ws_server.cognitive_runtime and ws_server.cognitive_runtime.learning:
             catalog.register('learning',ws_server.cognitive_runtime.learning)
+            ws_server.cognitive_runtime.learning.video.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.core.config.setdefault('available_tools',[]).extend(await ws_server.cognitive_runtime.learning.discover())
         tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))
         async def _esp_executor(action):

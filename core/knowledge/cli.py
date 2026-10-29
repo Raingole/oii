@@ -41,6 +41,10 @@ async def status(config):
     key=str(vision.get('api_key',''))
     print(json.dumps({'bilibili':login,'knowledge':store.status(),'last_run':store.state('last_run'),
         'vision':{'selected':selected,'model':vision.get('model_name'),'key_configured':bool(key and '你的' not in key and 'YOUR_' not in key)},
+        'video':{'enabled':(settings.get('video') or {}).get('enabled',True),
+                 'ffmpeg':__import__('shutil').which((settings.get('video') or {}).get('ffmpeg') or 'ffmpeg') is not None,
+                 'ffprobe':__import__('shutil').which((settings.get('video') or {}).get('ffprobe') or 'ffprobe') is not None,
+                 'pipeline_present':(ROOT/'deploy/video/bridge.mjs').is_file()},
         'speech_synthesis':'pending'},ensure_ascii=False,indent=2))
 
 

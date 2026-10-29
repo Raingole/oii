@@ -67,7 +67,7 @@ class ActionDispatcher:
                     except asyncio.CancelledError:raise
                     except Exception as exc:
                         current=self.outbox.get(aid); attempts=current["attempts"] if current else claimed["attempts"]
-                        if attempts<self.max_attempts:
+                        if attempts<action_attempts:
                             retry=time.time()+min(.1*attempts,1.0); self.outbox.transition(aid,"retrying",str(exc),retry_at=retry); await asyncio.sleep(max(0,retry-time.time())); continue
                         self.outbox.transition(aid,"failed",str(exc)); return ActionResult(aid,"failed",False,error=str(exc),attempts=attempts)
         finally:
