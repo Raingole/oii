@@ -87,6 +87,65 @@ class EventRouter:
             logger.info(f'dsh install request handled event_id={event.event_id} status={status} delivered={delivery.success}')
             return {'event_id':event.event_id,'actions':[action.to_dict()],
                 'dispatched':[delivery.to_dict()],'dsh_install_request':status}
+        # A short affirmative can accept the *proposal to prepare a request*, but
+        # it must never authorize execution. Create the normal one-time code so
+        # the owner can review the exact, bounded task before anything runs.
+        affirmative = re.fullmatch(r'(?:同意|可以|好|行|嗯|继续|去吧|开始|ok|okay|yes)[。.!！ ]*', install_request, re.I)
+        if (dsh is not None and affirmative and event.source=='qq' and event.type=='message'
+                and event.metadata.get('platform','napcat')=='napcat'
+                and str(event.session_id or '').startswith('qq:private:')):
+            history=self.core.store.recent_conversation(event.session_id, limit=6)
+            supplied=event.metadata.get('conversation_history', [])
+            if isinstance(supplied, list):
+                for item in supplied:
+                    if isinstance(item, dict) and item.get('role') in {'user','assistant'} and item.get('content'):
+                        normalized={'role':str(item['role']),'content':str(item['content'])}
+                        if normalized not in history:
+                            history.append(normalized)
+            previous=next((item.get('content','') for item in reversed(history)
+                           if item.get('role')=='assistant' and item.get('content')), '')
+            waiting = bool(re.search(r'dsh_prepare|\bDSH\b', previous, re.I)
+                           and re.search(r'(?:等|需要|得|先).{0,12}(?:你)?(?:点头|同意|确认|批准)|请你(?:点头|同意|确认|批准)', previous))
+            if waiting:
+                if not dsh.enabled:
+                    reply='DSH 接入目前处于关闭状态，没有创建请求。'
+                    status='disabled'
+                elif not dsh.binary_path():
+                    reply='DSH 命令行工具还未安装。请先单独请求安装；这次没有运行任何 DSH 任务。'
+                    status='runtime_missing'
+                else:
+                    try:
+                        proposal=re.sub(r'\s+', ' ', previous).strip()[:400]
+                        task=('只读检查并解释助手刚才提出的内容；仅做分析，不修改文件、安装软件或更改配置。'
+                              '\n提议原文：'+proposal)
+                        prepared=await dsh.execute('dsh_prepare',{
+                            'operation':'run','task':task,
+                            'rationale':'你刚才同意我为上一条明确提出的 DSH 建立待确认请求；这条“可以”不作为执行授权。'},
+                            {'session_id':event.session_id,'actor_id':event.actor_id,
+                             'action':{'target':event.actor_id,'payload':{}}})
+                        if prepared.get('status')=='approval_required':
+                            reply=(f"DSH 请求已建立，尚未运行。\n任务：{prepared['display_task']}\n"
+                                f"理由：{prepared['rationale']}\n回复“同意 {prepared['approval_code']}”才会运行，"
+                                f"或回复“拒绝 {prepared['approval_code']}”取消。确认码 10 分钟内有效。")
+                            status='approval_required'
+                        else:
+                            reply='暂时无法建立 DSH 确认请求；没有运行任务。'
+                            status=str(prepared.get('status') or 'unavailable')
+                    except PermissionError:
+                        reply='DSH 请求仅接受已绑定主人的 QQ 私聊；没有运行任务。'
+                        status='owner_only'
+                    except Exception as exc:
+                        logger.warning(f'dsh proposal preparation failed event_id={event.event_id} error_type={type(exc).__name__}')
+                        reply='暂时无法建立 DSH 确认请求；没有运行任务，请稍后再试。'
+                        status='failed'
+                action=Action.create('send_message',{'session_id':event.session_id,
+                    'text':reply,'platform':'napcat'},
+                    channel=str(event.metadata.get('reply_channel') or 'qq'),
+                    target=str(event.metadata.get('reply_target') or event.actor_id))
+                delivery=await self.dispatcher.dispatch(event.event_id,action.to_dict())
+                logger.info(f'dsh proposal handled event_id={event.event_id} status={status} delivered={delivery.success}')
+                return {'event_id':event.event_id,'actions':[action.to_dict()],
+                    'dispatched':[delivery.to_dict()],'dsh_proposal_request':status}
         result = await self.core.process_event(event)
         if result.get("duplicate"): return result
         actions = result.get("actions", [])
