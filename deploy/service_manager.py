@@ -493,6 +493,7 @@ TimeoutStopSec=40
 KillMode=control-group
 UMask=0077
 Environment=OII_SERVICE_NAME={service_name()}
+EnvironmentFile=-{unit_directory(ROOT / '.dsh-launch.env')}
 
 [Install]
 WantedBy=multi-user.target

@@ -79,6 +79,25 @@ def register_observer(app, core_provider, config, *, root=None):
             "Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
             "Referrer-Policy":"no-referrer"})
 
+    async def dsh_requests(request):
+        if not valid_key(request):
+            return web.json_response({"ok":False,"error":"observer_key_required"},status=401,headers={"Cache-Control":"no-store"})
+        core=core_provider()
+        learning=getattr(core,'learning',None) if core else None
+        dsh=getattr(learning,'dsh',None) if learning else None
+        if dsh is None:
+            return web.json_response({"ok":False,"error":"dsh_service_unavailable"},status=503,headers={"Cache-Control":"no-store"})
+        scope=knowledge_scope(core)
+        if not scope:
+            return web.json_response({"ok":False,"error":"owner_scope_unavailable"},status=503,headers={"Cache-Control":"no-store"})
+        try:
+            limit=max(1,min(100,int(request.query.get('limit','50'))))
+        except ValueError:
+            return web.json_response({"ok":False,"error":"invalid_limit"},status=400)
+        snapshot=await asyncio.to_thread(dsh.observer_snapshot,scope,limit)
+        snapshot['ok']=True
+        return web.json_response(snapshot,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
+
     app.router.add_get("/memory", asset("memory.html"))
     app.router.add_get("/memory/", asset("memory.html"))
     app.router.add_get("/memory.html", asset("memory.html"))
@@ -90,5 +109,11 @@ def register_observer(app, core_provider, config, *, root=None):
     app.router.add_get("/knowledge.html", asset("knowledge.html"))
     app.router.add_get("/knowledge.css", asset("knowledge.css"))
     app.router.add_get("/knowledge.js", asset("knowledge.js"))
+    app.router.add_get("/dsh", asset("dsh-monitor.html"))
+    app.router.add_get("/dsh/", asset("dsh-monitor.html"))
+    app.router.add_get("/dsh-monitor.html", asset("dsh-monitor.html"))
+    app.router.add_get("/dsh-monitor.css", asset("dsh-monitor.css"))
+    app.router.add_get("/dsh-monitor.js", asset("dsh-monitor.js"))
     app.router.add_get("/api/knowledge/library", knowledge_library)
     app.router.add_get("/api/knowledge/images/{digest}", knowledge_image)
+    app.router.add_get("/api/dsh/requests", dsh_requests)
