@@ -36,3 +36,4 @@ data/video/
 *.lock
 data/state.json
 data/state.json.lock
+data/simulated_qq_users.json
