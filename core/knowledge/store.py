@@ -73,9 +73,9 @@ class KnowledgeStore:
     def next_interest(self, scope=None):
         with self.connect() as db:
             if scope:
-                row = db.execute('SELECT * FROM interests WHERE scope=? AND updated>? ORDER BY last_learned ASC,updated DESC LIMIT 1', (scope,time.time()-14*86400)).fetchone()
+                row = db.execute('SELECT * FROM interests WHERE scope=? AND updated>? AND last_learned<updated ORDER BY last_learned ASC,updated DESC LIMIT 1', (scope,time.time()-14*86400)).fetchone()
             else:
-                row = db.execute('SELECT * FROM interests WHERE updated>? ORDER BY last_learned ASC,updated DESC LIMIT 1', (time.time() - 14 * 86400,)).fetchone()
+                row = db.execute('SELECT * FROM interests WHERE updated>? AND last_learned<updated ORDER BY last_learned ASC,updated DESC LIMIT 1', (time.time() - 14 * 86400,)).fetchone()
             return dict(row) if row else None
 
     def mark_interest(self, scope, topic, now):

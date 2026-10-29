@@ -17,6 +17,26 @@ except ModuleNotFoundError:  # pragma: no cover
     logger = logging.getLogger(__name__)
 
 
+def explicit_bilibili_topic(text: str) -> str | None:
+    """Extract an explicit topic request; generic requests for a meme remain random."""
+    value = str(text or '').strip()
+    patterns = (
+        r'^(?:我)?(?:想|要|希望|需要)?(?:让你|让他|让它|请你|帮我|你)?(?:现在|立即|马上)?(?:去)?(?:B站|哔哩哔哩)?\s*(?:搜索|搜|查找)(?:一下|下)?(?:并)?(?:学习|学)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
+        r'^(?:我)?(?:想|要|希望|需要)?(?:让你|让他|让它|请你|帮我|你)?(?:现在|立即|马上)?(?:去)?(?:B站|哔哩哔哩)?\s*(?:学习|学)(?:一下|下)?(?:关键词|主题|搜索词)?\s*[：:「“\"]?(.+?)\s*[」”\"]?$',
+    )
+    for pattern in patterns:
+        match = re.match(pattern, value, re.I)
+        if not match:
+            continue
+        topic = match.group(1).strip().strip(' \t\r\n：:，,。.!！?？「」“”\"\'')
+        topic = re.sub(r'(?:并)?(?:加入|收录|存入)(?:知识库|知识花园)?$', '', topic).strip()
+        if topic.lower() in {'梗', '一个梗', '个梗', '新梗', '一个新梗', '随机梗', '热梗'}:
+            return None
+        if 2 <= len(topic) <= 80:
+            return topic
+    return None
+
+
 class EventRouter:
     """The only controller ingress into cognition and the only action handoff."""
     def __init__(self, core: CognitiveCore, dispatcher: ActionDispatcher):
@@ -53,9 +73,10 @@ class EventRouter:
         learning=getattr(self.core,'learning',None)
         meme_request=str(event.content.get('text') or '').strip()
         owner_qq=str(((getattr(learning,'config',{}) or {}).get('qq') or {}).get('owner_qq') or '') if learning else ''
+        topic_query=explicit_bilibili_topic(meme_request)
         wants_meme=(re.search(r'(?:去|现在|帮我|让你|自己去|你自己去|你去|给我)?\s*(?:上|去)?\s*(?:B站|哔哩哔哩)?\s*(?:找|搜|学|学习|刷)\s*(?:一下|一个|个|点|些)?\s*(?:B站|哔哩哔哩)?\s*(?:网络)?\s*梗',meme_request,re.I)
             or re.search(r'(?:去|现在|帮我|让你|自己去|你自己去|你去).{0,8}(?:学|学习|找|搜).{0,8}梗',meme_request,re.I))
-        if (learning is not None and wants_meme and event.source=='qq' and event.type=='message'
+        if (learning is not None and (topic_query or wants_meme) and event.source=='qq' and event.type=='message'
                 and event.metadata.get('platform','napcat')=='napcat'
                 and str(event.session_id or '').startswith('qq:private:')
                 and (not owner_qq or str(event.actor_id)==owner_qq)):
@@ -63,16 +84,19 @@ class EventRouter:
                 'session_id':event.session_id,'actor_id':event.actor_id,
                 'target':event.metadata.get('reply_target') or event.actor_id,
                 'platform':'napcat','last_input_at':time.time(),'event_id':event.event_id})
-            action=Action.create('call_mcp',{'tool':'meme_learn_now','arguments':{},
+            specific=bool(topic_query)
+            action=Action.create('call_mcp',{'tool':'bilibili_learn_topic' if specific else 'meme_learn_now',
+                'arguments':{'query':topic_query} if specific else {},
                 'session_id':event.session_id,'reply_target':event.metadata.get('reply_target') or event.actor_id,
                 'reply_channel':event.metadata.get('reply_channel') or 'qq','platform':'napcat'},
                 target=str(event.metadata.get('reply_target') or event.actor_id),channel='qq',
-                reason='用户明确要求现在学习一个B站梗')
+                reason='用户明确要求立即学习指定B站主题' if specific else '用户明确要求现在学习一个B站梗')
             started=await self.dispatcher.dispatch(event.event_id,action.to_dict())
             envelope=started.result if isinstance(started.result,dict) else {}
             payload=envelope.get('result') if isinstance(envelope.get('result'),dict) else {}
             if started.success and payload.get('status')=='started':
-                reply='好，我现在去 B 站找一个有字幕证据的新梗。完成或遇到问题后我会把结果发给你。'
+                reply=(f'收到，我现在按「{topic_query}」搜索并开始学习；完成或遇到问题后会告诉你。'
+                    if specific else '好，我现在去 B 站找一个有字幕证据的新梗。完成或遇到问题后我会把结果发给你。')
                 status='started'
             elif started.success and payload.get('status')=='already_running':
                 reply='我已经在处理一个 B 站学习任务了，结束后会把结果发给你。'
@@ -85,9 +109,10 @@ class EventRouter:
                 channel='qq',target=str(event.metadata.get('reply_target') or event.actor_id),
                 reason='回复明确的B站梗学习请求')
             delivered=await self.dispatcher.dispatch(event.event_id,response.to_dict())
-            logger.info(f'bilibili meme request handled event_id={event.event_id} status={status} delivered={delivered.success}')
+            logger.info(f'bilibili learning request handled event_id={event.event_id} kind={"topic" if specific else "meme"} status={status} delivered={delivered.success}')
             return {'event_id':event.event_id,'actions':[action.to_dict(),response.to_dict()],
-                'dispatched':[started.to_dict(),delivered.to_dict()],'meme_learning_request':status}
+                'dispatched':[started.to_dict(),delivered.to_dict()],
+                'topic_learning_request' if specific else 'meme_learning_request':status}
         dsh=getattr(getattr(self.core,'learning',None),'dsh',None)
         if (dsh is not None and event.source=='qq' and event.type=='message'
                 and event.metadata.get('platform','napcat')=='napcat'

@@ -152,6 +152,44 @@ class LearningService:
         self.task = asyncio.create_task(self._manual_meme_run(scope))
         return {'status':'started'}
 
+    async def request_topic_learning(self, scope, topic):
+        """Start an explicitly requested topic search immediately, outside the automatic queue."""
+        topic = str(topic or '').strip()[:80]
+        if scope != self.meme_scope():
+            return {'status':'owner_scope_unavailable'}
+        if len(topic) < 2 or re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret', topic, re.I):
+            return {'status':'invalid_query'}
+        if self.task and not self.task.done():
+            return {'status':'already_running'}
+        self.task = asyncio.create_task(self._manual_topic_run(scope, topic))
+        return {'status':'started'}
+
+    async def _manual_topic_run(self, scope, topic):
+        result = await self.run_once(force_interest={
+            'scope': scope, 'topic': topic, 'evidence': '用户明确指定的即时学习主题',
+        })
+        contact = self.core.store.runtime_get(f'contact:{self.core.agent_id}')
+        target = str(contact.get('target') or '')
+        if target.startswith('qq:'):
+            target = target[3:]
+        if not re.fullmatch(r'\d{5,20}', target) or scope != 'qq:private:' + target:
+            return result
+        if result.get('status') == 'learned':
+            message = f'指定主题「{topic}」学习完成，知识花园已更新。'
+            if result.get('title'):
+                message += f"\n来源：{str(result['title'])[:100]}"
+        else:
+            error = str(result.get('error') or result.get('status') or 'unknown')
+            message = f'指定主题「{topic}」这次没有学成（{error}）。任务状态已记在知识花园。'
+        if self.video.sender:
+            action = Action.create('send_message', {'session_id':scope, 'text':message, 'platform':'napcat'},
+                channel='qq', target=target, reason='报告用户明确指定主题的即时B站学习结果')
+            try:
+                await self.video.sender(f'topic-learning:{action.action_id}', action.to_dict())
+            except Exception as exc:
+                logger.warning(f'topic learning result delivery failed error_type={type(exc).__name__}')
+        return result
+
     async def _manual_meme_run(self, scope):
         result = await self.run_once(force_meme=True)
         contact = self.core.store.runtime_get(f'contact:{self.core.agent_id}')
@@ -176,7 +214,7 @@ class LearningService:
                 logger.warning(f'meme learning result delivery failed error_type={type(exc).__name__}')
         return result
 
-    async def run_once(self, force_meme=False):
+    async def run_once(self, force_meme=False, force_interest=None):
         if not self.settings.get('enabled', False):
             return {'status':'disabled'}
         if self.lock.locked():
@@ -189,25 +227,28 @@ class LearningService:
                 state.update(day=day, count=0)
             minimum = max(300, float(self.settings.get('min_interval_seconds',3600)))
             maximum = max(minimum, float(self.settings.get('max_interval_seconds',10800)))
-            job = None if force_meme else self.store.next_job()
-            meme_scope=self.meme_scope() if force_meme else self.meme_scope() if not job and self.meme_due() else ''
-            interest = self.store.next_interest() if not job and not meme_scope else None
-            if now < state.get('next_at', 0) and not meme_scope:
+            job = None if force_meme or force_interest else self.store.next_job()
+            meme_scope=self.meme_scope() if force_meme else self.meme_scope() if not job and not force_interest and self.meme_due() else ''
+            interest = force_interest or (self.store.next_interest() if not job and not meme_scope else None)
+            if now < state.get('next_at', 0) and not meme_scope and not force_interest:
                 return {'status':'waiting','next_at':state['next_at']}
-            if state.get('count',0) >= int(self.settings.get('max_daily_videos',6)) and not meme_scope:
+            if state.get('count',0) >= int(self.settings.get('max_daily_videos',6)) and not meme_scope and not force_interest:
                 return {'status':'daily_limit'}
             if not job and not interest and not meme_scope:
                 return {'status':'no_interest'}
             if self.core.llm is None:
                 return {'status':'model_unavailable'}
-            if not meme_scope:
+            if not meme_scope and not force_interest:
                 state.update(next_at=now+random.uniform(minimum,maximum), count=state.get('count',0)+1)
                 self.store.state('schedule', state)
             scope = job['scope'] if job else interest['scope'] if interest else meme_scope
             if meme_scope:
                 self.reserve_meme_slot(now)
-            self._status('learning', scope=scope, phase='checking_bilibili')
-            logger.info(f'bilibili learning started scope={scope} kind={"meme" if meme_scope else "video"}')
+            topic_meta = {'topic': interest['topic']} if force_interest else {}
+            kind = 'topic' if force_interest else 'meme' if meme_scope else 'video'
+            self._status('learning', scope=scope, phase='searching_bilibili' if force_interest else 'checking_bilibili',
+                trigger='user_request' if force_interest else 'scheduled', **topic_meta)
+            logger.info(f'bilibili learning started scope={scope} kind={kind}')
             try:
                 credentials = await self.client.call('check_bilibili_credentials')
                 if credentials.get('logged_in') is not True:
@@ -217,12 +258,12 @@ class LearningService:
                     result = await self.learn_video(job['scope'], job['video'])
                     self.store.finish_job(job['id'], 'done')
                 elif interest:
-                    self.store.mark_interest(interest['scope'], interest['topic'], now)
                     result = await self.learn_interest(interest)
+                    self.store.mark_interest(interest['scope'], interest['topic'], now)
                 else:
                     result=await self.learn_random_meme(meme_scope)
-                completed = self._status('learned', scope=scope, **result)
-                logger.info(f'bilibili learning completed scope={scope} kind={"meme" if meme_scope else "video"} status=learned')
+                completed = self._status('learned', scope=scope, **topic_meta, **result)
+                logger.info(f'bilibili learning completed scope={scope} kind={kind} status=learned')
                 return completed
             except asyncio.CancelledError:
                 raise
@@ -234,8 +275,8 @@ class LearningService:
                     error if error in safe or re.fullmatch(r'bilibili_(?:COOKIE_EXPIRED|SUBTITLE_UNAVAILABLE|API_RATE_LIMITED|VALIDATION_ERROR|AUTH_REQUIRED|CREDENTIALS_REQUIRED)',error) else type(exc).__name__)
                 if job:
                     self.store.finish_job(job['id'],'failed',category)
-                failed = self._status('learning_failed', scope=scope, phase='failed', error=category)
-                logger.warning(f'bilibili learning failed scope={scope} kind={"meme" if meme_scope else "video"} error={category}')
+                failed = self._status('learning_failed', scope=scope, phase='failed', error=category, **topic_meta)
+                logger.warning(f'bilibili learning failed scope={scope} kind={kind} error={category}')
                 return failed
 
     def _status(self, status, **extra):
@@ -451,6 +492,7 @@ class LearningService:
         def tool(name,description,properties,required=()):
             return {'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':list(required)},'risk_level':'low'}
         return [tool('bilibili_search','按主题搜索B站视频，只读，需要已登录。',{'query':{'type':'string'}},['query']),
+            tool('bilibili_learn_topic','用户明确指定搜索主题时立即搜索并学习该主题，不等待自动计划。',{'query':{'type':'string'}},['query']),
             tool('meme_learn_now','用户明确要求现在学习一个新梗时，立即随机搜索B站并把有字幕证据的梗加入知识库；任务在后台运行，完成或失败会回复用户。',{}),
             tool('bilibili_learn_video','把一个BV视频加入本地知识学习队列，稍后读取字幕并写来源笔记。',{'video':{'type':'string'}},['video']),
             tool('knowledge_search','检索当前会话的已学知识，返回视频来源与时间点。',{'query':{'type':'string'}},['query']),
@@ -470,6 +512,8 @@ class LearningService:
             if re.search(r'密码|口令|验证码|api.?key|token|cookie|sessdata|secret',query,re.I):
                 raise ValueError('query contains private credential markers')
             return await self.client.call('search_bilibili_videos',{'query':query,'limit':5})
+        if name == 'bilibili_learn_topic':
+            return await self.request_topic_learning(scope, arguments.get('query',''))
         if name == 'bilibili_learn_video':
             return self.store.enqueue(scope,video_id(arguments.get('video','')))
         if name == 'knowledge_search':
