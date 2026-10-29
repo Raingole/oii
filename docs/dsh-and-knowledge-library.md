@@ -10,7 +10,7 @@
 
 首次在 QQ 对主人说“安装 DSH 运行时”，确认安装请求后才会通过 npm 安装官方 `@deepseek-ai/dsh`。之后可提出单独的 DSH API 配置任务。DSH 运行获批任务时，会复用 OII 当前选中的 DeepSeek 提供方 API Key（也接受 `DEEPSEEK_API_KEY` 或 `LLM_API_KEY` 环境变量），仅传给该 DSH 子进程；不会传给 npm 安装进程，也不会写入日志或观察页面。
 
-`DEEPSEEK_BASE_URL` 是 DSH 启动级设置，不能放在项目 `.env` 或 DSH home `.env`。systemd 单元读取项目根目录可选的 `.dsh-launch.env`，OII 与 DSH 都会从启动环境读取该地址。若交互台报告 `.env` 中发现该设置，只需把 `DEEPSEEK_BASE_URL` 的原值移到 `.dsh-launch.env`，并从 `.env` 删除该行；API Key 可继续留在当前 DeepSeek 提供方的 YAML 配置中。保存后运行 `sudo bash auto-start.sh install` 重新生成并重启 systemd 服务。该文件已加入 Git 忽略列表。不要把访问密钥写到网页或聊天日志中。
+OII 与 DSH 使用不同的 DeepSeek API 协议端点：OII 使用 OpenAI-compatible `DEEPSEEK_BASE_URL`（通常是 `https://api.deepseek.com`）；DSH 的 Messages API 默认使用 `https://api.deepseek.com/anthropic`。OII 项目根目录的 `.dsh-launch.env` 可存放 OII 的 `DEEPSEEK_BASE_URL`，该变量不会再直接传给 DSH 子进程。若需要为 DSH 指定自定义 Messages API 地址，另设 `DSH_DEEPSEEK_BASE_URL`；OII 只会把它映射为 DSH 子进程的 `DEEPSEEK_BASE_URL`。DSH 会复用 OII 当前 DeepSeek 提供方的 API Key。`DEEPSEEK_BASE_URL` 不能放在项目 `.env` 或 DSH home `.env`；若交互台报告该设置，把它从这些 `.env` 文件移到项目根目录 `.dsh-launch.env`。该文件已加入 Git 忽略列表。不要把访问密钥写到网页或聊天日志中。
 
 每日主动思考只在配置的随机时间窗口内尝试一次，默认上海时间 09:00–22:00；会从近期对话和已学的 B 站资料取线索。主动思考若建议 DSH 操作，仍必须经过同一套 QQ 单次确认。
 

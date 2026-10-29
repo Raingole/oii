@@ -150,7 +150,7 @@ class DSHService:
                     item[name]=self._redact(item.get(name,''))
                 requests.append(item)
         return {'runtime_available':bool(self.binary_path()),'enabled':self.enabled,
-            'base_url_inherited':bool(os.environ.get('DEEPSEEK_BASE_URL')),
+            'dsh_custom_base_url':bool(os.environ.get('DSH_DEEPSEEK_BASE_URL')),
             'api_key_available':bool(self._deepseek_api_key()),
             'reserved_env_files':self.reserved_environment_files(), 'requests':requests}
 
@@ -328,9 +328,12 @@ class DSHService:
             'stderr':self._redact(stderr.decode('utf-8','replace'))[-5000:],'exit_code':proc.returncode}
 
     def _environment(self, dsh_home, *, include_api_key=False):
-        allowed={'PATH','HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','TMP','TEMP','NODE_BIN','DEEPSEEK_BASE_URL',
+        allowed={'PATH','HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','TMP','TEMP','NODE_BIN',
             'SSL_CERT_FILE','SSL_CERT_DIR','NPM_CONFIG_PREFIX','NPM_CONFIG_CACHE','SYSTEMROOT','WINDIR'}
         env={key:value for key,value in os.environ.items() if key in allowed}
+        dsh_base_url=os.environ.get('DSH_DEEPSEEK_BASE_URL')
+        if dsh_base_url:
+            env['DEEPSEEK_BASE_URL']=dsh_base_url
         if include_api_key:
             api_key=self._deepseek_api_key()
             if api_key:
