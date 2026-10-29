@@ -194,8 +194,9 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
         result = await self.core.process_event(event)
         self.assertEqual(result["actions"][0]["type"], "send_message")
         self.assertEqual(result["actions"][0]["payload"]["text"], "LLM 实际回复")
+        self.assertEqual(result['generation'], {'status': 'succeeded', 'attempts': 1})
 
-    async def test_cognitive_core_llm_failure_keeps_planner_fallback(self):
+    async def test_cognitive_core_llm_failure_is_explicit_and_bounded(self):
         class BrokenLLM:
             async def decide(self, prompt, context, trace_id=""):
                 raise RuntimeError("provider timeout")
@@ -205,7 +206,67 @@ class CognitiveCoreTests(unittest.IsolatedAsyncioTestCase):
         event = CognitiveEvent.create("qq", "message", "qq:2", "agent", {"text": "测试"}, "qq:2")
         result = await self.core.process_event(event)
         self.assertEqual(result["actions"][0]["type"], "send_message")
-        self.assertIn("我记下了", result["actions"][0]["payload"]["text"])
+        self.assertEqual(result["generation"], {"status": "failed", "attempts": 2, "error_type": "RuntimeError"})
+        self.assertEqual(result["actions"][0]["payload"]["text"], "这次没能生成回复，请稍后再试。")
+        activity = self.core.store.memory_activity(event.session_id)["selected"]
+        self.assertEqual(activity["generation"], result["generation"])
+        self.assertFalse(any(node['provided_to_model'] for node in activity['memory_nodes']))
+
+    async def test_invalid_first_decision_retries_without_dispatching(self):
+        class RecoveringLLM:
+            calls = 0
+            async def decide(self, prompt, context, trace_id=''):
+                self.calls += 1
+                if self.calls == 1:
+                    return {'message': 'invalid decision'}
+                return {'intent': 'tool_call', 'tool': 'get_weather', 'arguments': {}, 'risk_level': 'low'}
+        self.core.config.update(llm_enabled=True, available_tools=[{'name': 'get_weather'}])
+        self.core.llm = RecoveringLLM()
+        event = CognitiveEvent.create('qq', 'message', 'qq:3', 'agent', {'text': '查天气'}, 'qq:3')
+        result = await self.core.process_event(event)
+        self.assertEqual(result['generation'], {'status': 'retry_succeeded', 'attempts': 2})
+        self.assertEqual(len(result['actions']), 1)
+        self.assertEqual(result['actions'][0]['type'], 'call_mcp')
+        self.assertTrue((await self.core.process_event(event))['duplicate'])
+        self.assertEqual(self.core.llm.calls, 2)
+
+    async def test_empty_reply_does_not_silently_drop_message(self):
+        class EmptyLLM:
+            async def decide(self, *args):
+                return {'intent': 'reply', 'message': '  '}
+        self.core.config['llm_enabled'] = True
+        self.core.llm = EmptyLLM()
+        event = CognitiveEvent.create('esp32', 'speech', 'device:1', 'agent', {'text': '原文不能复读'}, 'device:1')
+        result = await self.core.process_event(event)
+        self.assertEqual(result['generation']['attempts'], 2)
+        self.assertEqual(result['actions'][0]['type'], 'speak')
+        self.assertNotIn('原文不能复读', result['actions'][0]['payload']['text'])
+
+    async def test_missing_model_never_claims_memory_was_saved(self):
+        self.core.config['llm_enabled'] = True
+        event = CognitiveEvent.create('qq', 'message', 'qq:4', 'agent', {'text': '不要复读这段话'}, 'qq:4', metadata={'reply_target': 'group:7'})
+        result = await self.core.process_event(event)
+        self.assertEqual(result['generation'], {'status': 'unavailable', 'attempts': 0})
+        self.assertEqual(result['actions'][0]['target'], 'group:7')
+        self.assertNotIn('不要复读这段话', result['actions'][0]['payload']['text'])
+
+    async def test_transient_timeout_recovers_tool_followup_in_same_context(self):
+        class TransientLLM:
+            calls = []
+            async def decide(self, prompt, context, trace_id=''):
+                self.calls.append((prompt, context, trace_id))
+                if len(self.calls) == 1:
+                    raise TimeoutError('temporary provider timeout')
+                return {'intent': 'reply', 'message': '查询结果是晴天。'}
+        self.core.config['llm_enabled'] = True
+        self.core.llm = TransientLLM()
+        event = CognitiveEvent.create('controller', 'action_result', 'self', 'environment', {'result': {'weather': 'sunny'}}, 'qq:5', metadata={'followup_reply': True, 'reply_target': 'group:9', 'reply_channel': 'qq'})
+        result = await self.core.process_event(event)
+        self.assertEqual(result['generation'], {'status': 'retry_succeeded', 'attempts': 2})
+        self.assertEqual(self.core.llm.calls[0], self.core.llm.calls[1])
+        self.assertEqual(len(result['actions']), 1)
+        self.assertEqual(result['actions'][0]['target'], 'group:9')
+        self.assertEqual(result['actions'][0]['payload']['text'], '查询结果是晴天。')
 
     async def test_cognitive_core_llm_tool_call_uses_catalog(self):
         class ToolLLM:

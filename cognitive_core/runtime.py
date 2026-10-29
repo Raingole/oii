@@ -17,7 +17,7 @@ from .planning import plan
 from .storage import StateStore
 from .memory import InMemoryAdapter, MemoryAdapter, should_store
 from .prompt_builder import build_runtime_prompt
-from .llm import ExistingProviderLLM
+from .llm import ExistingProviderLLM, validate_decision, LLMDecisionError
 from .observability import build_activity
 
 
@@ -73,6 +73,10 @@ class CognitiveCore:
         trace_id = str(event.metadata.get("trace_id") or event.event_id)
         decision = None
         llm_used = False
+        generation = {"status": "not_requested", "attempts": 0}
+        conversational = event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")
+        if conversational:
+            generation["status"] = "unavailable" if self.config.get("llm_enabled", False) else "disabled"
         if self.llm is not None and self.config.get("llm_enabled", False) and (event.source in {"qq", "esp32"} or event.metadata.get("followup_reply")):
             try:
                 prompt = build_runtime_prompt(
@@ -96,14 +100,28 @@ class CognitiveCore:
                     "trace_id": trace_id,
                     "session_id": event.session_id,
                 }
-                decision = await llm.decide(prompt, context, trace_id)
-                actions = self._actions_from_decision(decision, event)
-                llm_used = True
+                # Retry inference only, before any action is persisted or sent.
+                # A failed attempt cannot execute tools or duplicate delivery.
+                for attempt in range(1, 3):
+                    generation["attempts"] = attempt
+                    try:
+                        candidate = validate_decision(await llm.decide(prompt, context, trace_id))
+                        if candidate["intent"] == "reply" and not candidate["message"].strip():
+                            raise LLMDecisionError("empty_reply")
+                        candidate_actions = self._actions_from_decision(candidate, event)
+                    except Exception as exc:
+                        if attempt == 2:
+                            raise
+                        logger.warning(f"cognitive_llm_retry error_type={type(exc).__name__} trace_id={trace_id}")
+                    else:
+                        decision, actions, llm_used = candidate, candidate_actions, True
+                        break
+                generation["status"] = "retry_succeeded" if generation["attempts"] > 1 else "succeeded"
                 logger.info(f"llm decision generated trace_id={trace_id} intent={decision.get('intent', '')}")
             except Exception as exc:
-                # The deterministic planner remains the only fallback.  The
-                # reason is logged so silent LLM failures cannot suppress the
-                # legacy path without evidence.
+                generation.update(status="failed", error_type=type(exc).__name__)
+                decision = None
+                actions = self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
                 logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
         memory_policy = should_store(event, app)
         if memory_policy == "episodic" or event.type == "action_result":
@@ -149,11 +167,13 @@ class CognitiveCore:
             manager = getattr(self.memory, "manager", None)
             backend = getattr(manager, "backend_name", "adapter")
             try:
-                self.store.save_memory_activity(build_activity(event, memories, meaning_result, goals_for_turn, actions, decision, llm_used, backend))
+                activity = build_activity(event, memories, meaning_result, goals_for_turn, actions, decision, llm_used, backend)
+                activity["generation"] = generation
+                self.store.save_memory_activity(activity)
             except Exception:
                 logger.warning(f"memory observer capture failed event_id={event.event_id}")
         self.last_tick = {"event": event.to_dict(), "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories]}
-        return {"event_id": event.event_id, "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories], "actions": [a.to_dict() for a in actions]}
+        return {"event_id": event.event_id, "appraisal": app, "meaning": meaning_result, "memory_refs": [m.text for m in memories], "actions": [a.to_dict() for a in actions], "generation": generation}
 
     @staticmethod
     def _reply_target(event: CognitiveEvent) -> str:

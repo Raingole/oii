@@ -160,7 +160,9 @@
     $('current-text').textContent = selected ? '“' + (selected.input_text || selected.query) + '”' : '等待一段真实对话';
     $('current-meta').textContent = selected ? `${sourceNames[selected.source] || selected.source} · ${formatDate(selected.timestamp, true)} · ${selected.mode === 'llm' ? '模型决策' : '规则决策'}` : '';
     renderGraph(); renderCognition();
-    if (result.backend !== 'mmtr') notice(`当前后端为 ${result.backend}，更新并重启中控后将优先使用 MMTR。`);
+    if (['failed', 'unavailable', 'disabled'].includes(selected?.generation?.status)) notice('本轮回复未能生成。请检查中控日志中的 cognitive_llm_fallback 或模型配置；记忆连接状态单独显示。');
+    else if (selected?.generation?.status === 'retry_succeeded') notice('本轮首次生成失败，重试后已恢复正常回复。');
+    else if (result.backend !== 'mmtr') notice(`当前后端为 ${result.backend}，更新并重启中控后将优先使用 MMTR。`);
     else if (result.memory_degraded) notice('记忆接口当前异常，本轮关联可能不完整。');
     else if (selected?.omitted_reminders) notice('部分约定超出本轮上下文预算，未出现在当前关联中。');
     else notice();

@@ -16,7 +16,7 @@ def plan(event: Any, self_model: Any, goals: list[dict[str, Any]], tools: list[d
             return [Action.create("call_mcp", {"tool": "weather", "arguments": {}}, risk_level="low", reason="unfinished goal")]
         return [Action.create("do_nothing", reason="initiative below action threshold")]
     if event.source == "qq" and text:
-        return [Action.create("send_message", {"text": f"我记下了：{text}", "platform": event.metadata.get("platform", "napcat"), "source_message_id": event.source_event_id}, channel="qq", target=event.actor_id, reason="event response")]
+        return [Action.create("send_message", {"text": "这次没能生成回复，请稍后再试。", "platform": event.metadata.get("platform", "napcat"), "source_message_id": event.metadata.get("source_message_id", event.source_event_id)}, channel=str(event.metadata.get("reply_channel") or "qq"), target=str(event.metadata.get("reply_target") or event.actor_id), reason="reply generation unavailable")]
     if event.source == "esp32" and text:
-        return [Action.create("speak", {"text": "我听见了。"}, channel="esp32", target=event.actor_id, reason="embodied response")]
+        return [Action.create("speak", {"text": "这次没能生成回复，请稍后再试。"}, channel="esp32", target=event.actor_id, reason="reply generation unavailable")]
     return [Action.create("wait", reason="no immediate action")]
