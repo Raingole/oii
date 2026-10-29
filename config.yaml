@@ -122,6 +122,7 @@ cognitive_core:
     quiet_end_hour: 8
     max_daily_starts: 8
     contact_max_age_seconds: 259200
+    topic_cooldown_count: 5
   # 在这里填写 Cognitive Core 的人格提示词；留空则只使用结构化 Self Model。
   persona_prompt: ""
 
