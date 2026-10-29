@@ -94,6 +94,8 @@ class LearningService:
         self.video = VideoService(self.root,config,self.store,core)
         from .dsh import DSHService
         self.dsh = DSHService(self.root,config,core,self.store)
+        from .diary import DiaryService
+        self.diary = DiaryService(config, core, self.store)
 
     @property
     def settings(self):
@@ -195,6 +197,7 @@ class LearningService:
 
     def kick(self):
         self.video.kick()
+        self.diary.kick()
         if not self.settings.get('enabled', False) or (self.task and not self.task.done()):
             return
         meme_due=self.meme_due()
@@ -334,12 +337,27 @@ class LearningService:
                 safe = {'transcript_required_not_description','transcript_too_short','learning_summary_unavailable','no_new_video_candidate','no_relevant_video_candidate','meme_extraction_unavailable','meme_transcript_missing','bilibili_response_not_structured','bilibili_process_exited','bilibili_protocol_error','bilibili_protocol_limit','bilibili_upstream_error','bilibili_runtime_missing','bilibili_request_timeout'}
                 category = ('bilibili_request_timeout' if isinstance(exc, asyncio.TimeoutError) else
                     error if error in safe or re.fullmatch(r'bilibili_(?:COOKIE_EXPIRED|SUBTITLE_UNAVAILABLE|API_RATE_LIMITED|VALIDATION_ERROR|AUTH_REQUIRED|CREDENTIALS_REQUIRED)',error) else type(exc).__name__)
+                timed_out = isinstance(exc, asyncio.TimeoutError)
                 if job:
-                    self.store.finish_job(job['id'],'failed',category)
+                    self.store.finish_job(job['id'], 'queued' if timed_out else 'failed', category)
                 previous_phase=str(self.store.state('last_run').get('phase') or 'unknown')
+                retry_delay = max(60, float(self.settings.get('retry_delay_seconds', 300)))
+                # A failed attempt must not consume the whole daily budget or
+                # leave the next retry an hour away. Preserve the queued work
+                # and retry it shortly; successful runs alone consume quota.
+                schedule = self.store.state('schedule')
+                schedule['next_at'] = self.clock() + retry_delay
+                if not force_interest and not force_meme:
+                    schedule['count'] = max(0, int(schedule.get('count', 0)) - 1)
+                self.store.state('schedule', schedule)
+                if meme_scope:
+                    meme_schedule = self.store.state('meme_schedule')
+                    meme_schedule['next_at'] = self.clock() + retry_delay
+                    meme_schedule['count'] = max(0, int(meme_schedule.get('count', 0)) - 1)
+                    self.store.state('meme_schedule', meme_schedule)
                 failed = self._status('learning_failed', scope=scope, phase='failed', failed_phase=previous_phase,
-                    error=category, **topic_meta)
-                logger.warning(f'bilibili learning failed scope={scope} kind={kind} error={category}')
+                    error=category, retry_at=self.clock() + retry_delay, **topic_meta)
+                logger.warning(f'bilibili learning failed scope={scope} kind={kind} phase={previous_phase} error={category} retry_seconds={int(retry_delay)}')
                 return failed
 
     def _status(self, status, **extra):
@@ -641,6 +659,9 @@ class LearningService:
 
     async def close(self):
         await self.video.close()
+        if self.diary.task and not self.diary.task.done():
+            self.diary.task.cancel()
+            await asyncio.gather(self.diary.task, return_exceptions=True)
         if self.task and not self.task.done():
             self.task.cancel()
             await asyncio.gather(self.task,return_exceptions=True)

@@ -54,18 +54,22 @@
   function refreshLearning(data){
     const box=$('learning-status'),info=data.learning_status||{},last=info.last_run||{},schedule=info.meme_schedule||{};
     if(!info.enabled){box.textContent='B站学习已关闭';return;}
-    const phase={checking_bilibili:'正在检查 B 站登录',searching_bilibili:'正在搜索梗视频',fetching_subtitles:'正在读取视频字幕',extracting_memes:'正在整理字幕里的梗'};
+    const phase={checking_bilibili:'正在检查 B 站登录',checking_bilibili_credentials:'正在检查 B 站登录',searching_bilibili:'正在搜索 B 站视频',fetching_subtitles:'正在读取视频字幕',fetching_comments:'正在读取视频评论',extracting_memes:'正在整理字幕和评论里的梗'};
     const errors={needs_bilibili_login:'B 站尚未登录',no_new_video_candidate:'没有找到新的合适视频',meme_transcript_missing:'视频没有可用字幕',transcript_too_short:'字幕内容太少',meme_extraction_unavailable:'模型未能从字幕中确认梗',bilibili_request_timeout:'B 站请求超时',bilibili_runtime_missing:'B 站组件未安装',bilibili_process_exited:'B 站进程已退出',process_restarted:'服务重启时任务被中断'};
     let text='';
     if(last.status==='learning')text=phase[last.phase]||'梗学习进行中';
     else if(last.status==='learned')text=`最近学习完成 · 收录 ${last.meme_count??0} 条梗`;
-    else if(last.status==='learning_failed')text=`最近一次学习失败 · ${errors[last.error]||last.error||'原因未记录'}`;
+    else if(last.status==='learning_failed')text=`最近一次学习失败 · ${errors[last.error]||last.error||'原因未记录'}${last.failed_phase?'（阶段：'+(phase[last.failed_phase]||last.failed_phase)+'）':''}`;
     else if(last.status==='needs_bilibili_login')text='B 站尚未登录，登录后会继续学习';
     else text=info.meme_enabled?'等待下一次梗学习':'梗学习已关闭';
     if(last.title)text+=' · '+last.title;
-    if(schedule.next_at&&last.status!=='learning'){
+    if(schedule.next_at&&last.status!=='learning'&&!(last.retry_at&&last.status==='learning_failed')){
       const next=new Date(Number(schedule.next_at)*1000);
       if(Number.isFinite(+next))text+=` · 下次计划 ${new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(next)}`;
+    }
+    if(last.retry_at&&last.status==='learning_failed'){
+      const retry=new Date(Number(last.retry_at)*1000);
+      if(Number.isFinite(+retry))text+=` · 重试 ${new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(retry)}`;
     }
     box.textContent=text;
   }

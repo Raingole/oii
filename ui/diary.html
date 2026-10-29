@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f7f6f2">
+  <meta name="referrer" content="no-referrer">
+  <title>私人日记 · OII</title>
+  <link rel="stylesheet" href="/diary.css?v=1">
+  <script src="/diary.js?v=1" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/knowledge.html">OII <span>PRIVATE JOURNAL</span></a><nav><a href="/knowledge.html">知识花园</a><a href="/memory.html">记忆观察台</a><button id="connect" type="button">连接私人日记</button></nav></header>
+  <main>
+    <section class="intro"><span class="eyebrow">只属于自己的角落</span><h1>私人日记</h1><p>每天留下一点值得记住的东西。写什么由它自己决定，不按表格填，也不必每次都谈情绪。</p><div id="status" class="status">等待连接</div></section>
+    <section class="entries"><div class="section-head"><div><h2>日子留下的片段</h2><p>只有通过私人访问密钥才能读取</p></div><button id="refresh" type="button" aria-label="刷新日记">↻</button></div><div id="list"><article class="empty">连接后，这里会出现每天写下的日记。</article></div></section>
+    <footer>日记保存在 OII 本地知识库的独立私人区域，不参与对话检索或 B 站知识索引。</footer>
+  </main>
+  <dialog id="auth"><form id="auth-form"><h2>连接私人日记</h2><p>使用知识花园或记忆观察台的访问密钥。密钥只保存在当前浏览器会话。</p><label for="token">访问密钥</label><input id="token" type="password" autocomplete="off" required><p id="error" class="error"></p><div class="actions"><button id="disconnect" type="button" class="muted">断开</button><button type="submit">连接</button></div></form></dialog>
+</body>
+</html>

@@ -106,6 +106,26 @@ def register_observer(app, core_provider, config, *, root=None):
         snapshot['ok']=True
         return web.json_response(snapshot,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
 
+    async def private_diary(request):
+        if not valid_key(request):
+            return web.json_response({"ok":False,"error":"observer_key_required"},status=401,headers={"Cache-Control":"no-store"})
+        core=core_provider()
+        learning=getattr(core,'learning',None) if core else None
+        scope=knowledge_scope(core) if core else ''
+        if learning is None or not scope:
+            return web.json_response({"ok":False,"error":"private_diary_unavailable"},status=503,headers={"Cache-Control":"no-store"})
+        try:
+            limit=max(1,min(365,int(request.query.get('limit','60'))))
+        except ValueError:
+            return web.json_response({"ok":False,"error":"invalid_limit"},status=400)
+        entries=await asyncio.to_thread(learning.store.diary_entries,scope,limit)
+        schedule=learning.store.state('diary_schedule')
+        if schedule.get('scope') != scope:
+            schedule={}
+        return web.json_response({"ok":True,"entries":entries,"status":schedule.get('status','waiting'),
+            "retry_at":schedule.get('retry_at',0),"error":schedule.get('error','')},
+            headers={"Cache-Control":"private,no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"})
+
     app.router.add_get("/memory", asset("memory.html"))
     app.router.add_get("/memory/", asset("memory.html"))
     app.router.add_get("/memory.html", asset("memory.html"))
@@ -122,6 +142,12 @@ def register_observer(app, core_provider, config, *, root=None):
     app.router.add_get("/dsh-monitor.html", asset("dsh-monitor.html"))
     app.router.add_get("/dsh-monitor.css", asset("dsh-monitor.css"))
     app.router.add_get("/dsh-monitor.js", asset("dsh-monitor.js"))
+    app.router.add_get("/diary", asset("diary.html"))
+    app.router.add_get("/diary/", asset("diary.html"))
+    app.router.add_get("/diary.html", asset("diary.html"))
+    app.router.add_get("/diary.css", asset("diary.css"))
+    app.router.add_get("/diary.js", asset("diary.js"))
     app.router.add_get("/api/knowledge/library", knowledge_library)
     app.router.add_get("/api/knowledge/images/{digest}", knowledge_image)
     app.router.add_get("/api/dsh/requests", dsh_requests)
+    app.router.add_get("/api/private/diary", private_diary)

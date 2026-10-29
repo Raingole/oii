@@ -41,6 +41,9 @@ class KnowledgeStore:
                 CREATE TABLE IF NOT EXISTS meme_assets (
                   scope TEXT NOT NULL,hash TEXT NOT NULL,image BLOB NOT NULL,payload TEXT NOT NULL,
                   created REAL NOT NULL,used REAL NOT NULL DEFAULT 0,PRIMARY KEY(scope,hash));
+                CREATE TABLE IF NOT EXISTS private_diary (
+                  scope TEXT NOT NULL,day TEXT NOT NULL,content TEXT NOT NULL,created REAL NOT NULL,
+                  PRIMARY KEY(scope,day));
             ''')
 
     def connect(self):
@@ -224,3 +227,17 @@ class KnowledgeStore:
         with self.connect() as db:
             where, args = (' WHERE scope=?', (scope,)) if scope else ('', ())
             return {name: db.execute(f'SELECT COUNT(*) FROM {name}' + where, args).fetchone()[0] for name in ('sources', 'interests', 'jobs', 'media', 'meme_assets')}
+
+    def save_diary(self, scope, day, content, created=None):
+        with self.connect() as db:
+            db.execute('INSERT OR IGNORE INTO private_diary(scope,day,content,created) VALUES (?,?,?,?)',
+                (scope, day, content[:12000], created or time.time()))
+            row = db.execute('SELECT day,content,created FROM private_diary WHERE scope=? AND day=?',
+                (scope, day)).fetchone()
+        return dict(row) if row else None
+
+    def diary_entries(self, scope, limit=60):
+        with self.connect() as db:
+            rows = db.execute('SELECT day,content,created FROM private_diary WHERE scope=? ORDER BY day DESC LIMIT ?',
+                (scope, max(1, min(365, int(limit))))).fetchall()
+        return [dict(row) for row in rows]
