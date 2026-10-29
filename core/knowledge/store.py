@@ -115,7 +115,7 @@ class KnowledgeStore:
                 db.execute('INSERT INTO chunk_search(rowid,terms) VALUES (?,?)', (row.lastrowid, ' '.join(search_terms(content))))
         return ident
 
-    def search(self, scope, query, limit=3, budget=2200):
+    def search(self, scope, query, limit=3, budget=2200, data_source=None):
         terms = search_terms(query)[:12]
         if not terms:
             return []
@@ -123,7 +123,8 @@ class KnowledgeStore:
         with self.connect() as db:
             rows = db.execute('''SELECT c.*,s.url,s.title,s.data_source,s.summary FROM chunk_search
                 JOIN chunks c ON c.id=chunk_search.rowid JOIN sources s ON s.id=c.source_id
-                WHERE chunk_search MATCH ? AND s.scope=? ORDER BY bm25(chunk_search) LIMIT ?''', (expression, scope, min(5, max(1, limit)))).fetchall()
+                WHERE chunk_search MATCH ? AND s.scope=? AND (? IS NULL OR s.data_source=?) ORDER BY bm25(chunk_search) LIMIT ?''',
+                (expression, scope, data_source, data_source, min(10, max(1, limit)))).fetchall()
         result, used, noted = [], 0, set()
         for row in rows:
             item = dict(row)
