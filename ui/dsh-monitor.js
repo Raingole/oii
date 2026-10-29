@@ -63,12 +63,13 @@
     const data=state.snapshot;if(!data)return;
     setHealth('dsh-runtime',data.enabled?(data.runtime_available?'已启用 · CLI 可定位':'已启用 · 未找到 CLI'):'已关闭',data.enabled&&data.runtime_available?'good':'bad');
     const files=data.reserved_env_files||[];
-    setHealth('env-state',files.length?'检测到受保护配置':data.base_url_inherited?'启动环境含 Base URL':'未检测到启动阻塞',files.length?'bad':data.base_url_inherited?'good':'neutral');
+    const startupConfigured=data.base_url_inherited&&data.api_key_inherited;
+    setHealth('env-state',files.length?'检测到受保护配置':startupConfigured?'Base URL 与 API Key 已传入':data.base_url_inherited||data.api_key_inherited?'启动环境配置不完整':'未检测到启动阻塞',files.length?'bad':startupConfigured?'good':data.base_url_inherited||data.api_key_inherited?'warn':'neutral');
     setHealth('record-count',`${data.requests?.length||0} 条`,(data.requests||[]).length?'good':'neutral');
     $('updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     const warning=$('env-warning');warning.replaceChildren();
     if(files.length){warning.hidden=false;warning.append(el('strong','', 'DSH 启动配置会阻止任务运行'));
-      warning.append(el('span','', '发现 DEEPSEEK_BASE_URL 写在 .env 文件中。DSH 只接受由启动进程传入该变量；请从下面文件移除这行，并放入 OII 项目根目录的 .dsh-launch.env，然后重新安装/重载 systemd 服务。'));
+      warning.append(el('span','', '发现 DEEPSEEK_BASE_URL 写在 .env 文件中。DSH 只接受由启动进程传入该变量；请将 DEEPSEEK_BASE_URL 和 OII 使用的 DEEPSEEK_API_KEY 一起移入 OII 项目根目录的 .dsh-launch.env，并从 .env 删除这两行，然后重新安装/重载 systemd 服务。'));
       const list=el('ul');for(const file of files)list.append(el('li','',file));warning.append(list,el('p','', '服务端操作完成后运行：sudo bash auto-start.sh install'));}
     else warning.hidden=true;
   }
