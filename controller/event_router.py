@@ -113,7 +113,7 @@ class EventRouter:
             if candidate_stage:
                 stage = str(candidate_stage)
             if runtime in {'missing', 'unavailable'}:
-                stage = 'runtime_startup'
+                stage = str(value.get('phase') or value.get('stage') or 'runtime_startup')
                 specific_errors.append(str(value.get('error') or f'{tool}_runtime_{runtime}'))
             error_type = str(value.get('error_type') or '').strip()
             for key in ('error', 'error_code', 'failure_category', 'reason'):

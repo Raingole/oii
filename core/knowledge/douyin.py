@@ -26,6 +26,7 @@ class DouyinClient:
         self.process = None
         self.lock = asyncio.Lock()
         self.sequence = 0
+        self.last_stage = 'process_startup'
 
     def _environment(self):
         allowed = {
@@ -84,6 +85,7 @@ class DouyinClient:
     async def _start(self):
         if self.process and self.process.returncode is None:
             return
+        self.last_stage = 'process_startup'
         entry = self.project / 'main.py'
         if not entry.is_file() or not self.python.is_file():
             raise RuntimeError('douyin_runtime_missing')
@@ -92,12 +94,14 @@ class DouyinClient:
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, limit=4 * 1024 * 1024,
         )
+        self.last_stage = 'mcp_initialize'
         await self._request('initialize', {
             'protocolVersion': '2024-11-05', 'capabilities': {},
             'clientInfo': {'name': 'oii-learning', 'version': '1.0'},
         })
         self.process.stdin.write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
         await self.process.stdin.drain()
+        self.last_stage = 'ready'
 
     async def call(self, tool, arguments=None):
         if tool not in READ_TOOLS:
@@ -106,6 +110,7 @@ class DouyinClient:
             try:
                 async def invoke():
                     await self._start()
+                    self.last_stage = f'{tool}_request'
                     result = await self._request('tools/call', {'name': tool, 'arguments': arguments or {}})
                     data = result.get('structuredContent')
                     if not isinstance(data, dict):
@@ -128,7 +133,15 @@ class DouyinClient:
                         raise RuntimeError(safe_errors.get(error_type, 'douyin_upstream_error'))
                     return data
                 timeout = max(1.0, float(self.config.get('timeout_seconds', 120)))
+                if tool == 'check_login_status':
+                    # The shared 1800s setting is intended for media/learning
+                    # jobs; a status probe must fail fast with a useful phase.
+                    timeout = min(timeout, 120.0)
                 return await asyncio.wait_for(invoke(), timeout=timeout)
+            except asyncio.TimeoutError:
+                stage = self.last_stage
+                await self.close()
+                raise RuntimeError(f'douyin_{stage}_timeout') from None
             except BaseException:
                 await self.close()
                 raise
@@ -312,7 +325,11 @@ class DouyinService:
             except RuntimeError as exc:
                 if str(exc) == 'douyin_runtime_missing':
                     return {'runtime': 'missing', 'login': 'unknown', 'next_step': 'sudo bash auto-start.sh restart'}
-                return {'runtime': 'unavailable', 'error': str(exc)}
+                code = str(exc) or 'douyin_status_failed'
+                phase = ('mcp_initialize' if 'initialize' in code else
+                         'check_login_status_request' if 'check_login_status_request' in code else
+                         'process_startup')
+                return {'runtime': 'unavailable', 'phase': phase, 'error': code}
         if name in {'douyin_search', 'douyin_learn_topic'}:
             query = str(arguments.get('query') or '').strip()
             if not 2 <= len(query) <= 80:
