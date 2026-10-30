@@ -315,7 +315,7 @@ class CognitiveCore:
                     and event.metadata.get('platform')=='napcat'
                     and event.session_id.startswith('qq:private:')
                     and 'qq_send_tts_audio' in {self._tool_name(item) for item in self.config.get('available_tools',[]) or []}):
-                args={key:audio_reply.get(key) for key in ('text','video','from_seconds','to_seconds','caption') if audio_reply.get(key) is not None}
+                args={key:audio_reply.get(key) for key in ('text','video','from_seconds','to_seconds','caption','instruction') if audio_reply.get(key) is not None}
                 args['type']=audio_type
                 actions.append(Action.create('call_mcp',
                     {'tool':'qq_send_tts_audio','arguments':args,

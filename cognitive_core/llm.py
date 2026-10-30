@@ -70,6 +70,7 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
             'from_seconds':audio_reply.get('from_seconds'),
             'to_seconds':audio_reply.get('to_seconds'),
             'caption':str(audio_reply.get('caption','') or '')[:160],
+            'instruction':str(audio_reply.get('instruction','') or '')[:120],
         }
     return {
         "intent": intent,

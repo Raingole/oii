@@ -68,7 +68,7 @@ class VideoService:
                 {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}}),
             tool('qq_send_tts_audio','按当前阿里百炼 TTS 配置与流萤音色合成一条短语音并发送到当前QQ私聊。只在语境自然时调用。',
                 {'type':{'type':'string','enum':['tts','bilibili']},'text':{'type':'string'},'video':{'type':'string'},
-                 'from_seconds':{'type':'number'},'to_seconds':{'type':'number'},'caption':{'type':'string'}},['type']),
+                 'from_seconds':{'type':'number'},'to_seconds':{'type':'number'},'caption':{'type':'string'},'instruction':{'type':'string'}},['type']),
             tool('qq_send_relevant_image','从当前QQ私聊收到并保存在本地的图片库中，按语境挑一张合适的表情包或图片发出。仅当图片确实能自然补充当前回复时调用；先用具体语境描述检索，不要为了发图而发图。只会使用当前私聊用户自己的图片。',
                 {'query':{'type':'string','description':'当前对话里希望图片表达的含义、情绪或场景'},'caption':{'type':'string','description':'可选的简短配文'}},['query']),
             tool('bilibili_autoshare','查看或调整按聊天兴趣自主分享B站视频；每天最多分享数由中控限制。用户要求停止时设置enabled=false。',
@@ -252,7 +252,8 @@ class VideoService:
                     raise ValueError('configured_tts_provider_not_supported_for_qq')
                 from core.providers.tts.alibl_stream import TTSProvider
                 provider=TTSProvider(tts_config,True)
-                audio=await provider.synthesize_wav(text)
+                instruction=str(arguments.get('instruction') or '自然平稳地说话。').strip()[:120]
+                audio=await provider.synthesize_wav(text,instruction=instruction)
                 (folder/'voice.wav').write_bytes(audio)
                 suffix='wav'
             elif kind=='bilibili':

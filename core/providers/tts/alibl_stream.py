@@ -102,7 +102,7 @@ class TTSProvider(TTSProviderBase):
             self.last_active_time = None
             raise
 
-    async def synthesize_wav(self, text: str, sample_rate: int = 24000) -> bytes:
+    async def synthesize_wav(self, text: str, sample_rate: int = 24000, instruction: str = "") -> bytes:
         """Create a standalone WAV for QQ using the configured model and voice."""
         if not self.api_key:
             raise ValueError("TTS API key is not configured")
@@ -119,7 +119,8 @@ class TTSProvider(TTSProviderBase):
                 "payload": {"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer",
                     "model": self.model, "parameters": {"text_type": "PlainText", "voice": self.voice,
                     "format": "pcm", "sample_rate": sample_rate, "volume": self.volume,
-                    "rate": self.rate, "pitch": self.pitch}, "input": {}},
+                    "rate": self.rate, "pitch": self.pitch,
+                    "instruction": str(instruction or "")[:120]}, "input": {}},
             }))
             started = False
             while not started:
