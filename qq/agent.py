@@ -158,6 +158,10 @@ class QQAgent:
                             "name": str(name),
                             "description": function.get("description") or tool.get("description", ""),
                             "parameters": function.get("parameters") or tool.get("parameters", {}),
+                            "risk_level": function.get("risk_level") or tool.get("risk_level"),
+                            "requires_controller_approval": bool(
+                                function.get("requires_controller_approval") or tool.get("requires_controller_approval")
+                            ),
                         })
                     learning = getattr(getattr(self.controller,'cognitive_runtime',None),'learning',None)
                     if learning:

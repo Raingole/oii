@@ -342,6 +342,18 @@ class CognitiveCore:
             allowed = {self._tool_name(item) for item in available_tools}
             if not tool or (available_tools and tool not in allowed):
                 return [Action.create("do_nothing", reason="LLM requested unavailable tool")]
+            if decision.get("native_tool_markup"):
+                descriptor = next((item for item in available_tools if self._tool_name(item) == tool), None)
+                function = descriptor.get("function") if isinstance(descriptor, dict) else None
+                declared_risk = (descriptor.get("risk_level") if isinstance(descriptor, dict) else None)
+                if declared_risk is None and isinstance(function, dict):
+                    declared_risk = function.get("risk_level")
+                requires_tool_approval = bool(
+                    descriptor.get("requires_controller_approval")
+                    or (function.get("requires_controller_approval") if isinstance(function, dict) else False)
+                ) if isinstance(descriptor, dict) else True
+                if str(declared_risk or "").lower() != "low" or requires_tool_approval:
+                    return [Action.create("do_nothing", reason="native tool markup is restricted to registered low-risk tools")]
             arguments = decision.get("arguments", {})
             if not isinstance(arguments, dict):
                 arguments = {}

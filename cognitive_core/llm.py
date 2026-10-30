@@ -84,6 +84,7 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
         ],
         "tool": str(tool),
         "arguments": args,
+        "native_tool_markup": bool(value.get("native_tool_markup", False)),
         "risk_level": risk,
         "reason": str(value.get("reason", "") or ""),
         "goal_id": str(value.get("goal_id", "") or ""),
@@ -101,9 +102,16 @@ def parse_decision(raw: str) -> dict[str, Any]:
     """
     text = str(raw).strip()
     compact = re.sub(r"\s+", "", text).replace("｜", "|").lower()
-    if any(marker in compact for marker in ("<|dsml|calls", "<|dsml|invoke", "<|dsml|parameter", "<tool_call", "<function_call")):
-        # DeepSeek-native tool markup is not the cognitive JSON protocol. It
-        # must never be surfaced as chat text or interpreted as an action.
+    if re.search(r"<\|+dsml\|+", compact):
+        # Some DeepSeek-compatible endpoints return their native tool tokens
+        # in content, using full-width or doubled pipes. Normalize only the
+        # envelope and accept exactly one fully formed call; dispatch still
+        # checks the registered tool and its declared risk level.
+        parsed_call = _parse_native_dsml_call(text)
+        if parsed_call is None:
+            raise LLMDecisionError("unparsed_tool_markup")
+        return validate_decision({**parsed_call, "native_tool_markup": True})
+    if any(marker in compact for marker in ("<tool_call", "<function_call")):
         raise LLMDecisionError("unparsed_tool_markup")
     parsed = parse_structured(text, None, None)
     if not isinstance(parsed, dict) or not parsed:
@@ -139,6 +147,61 @@ def parse_decision(raw: str) -> dict[str, Any]:
         return validate_decision(parsed)
     except (TypeError, ValueError) as exc:
         raise LLMDecisionError(f"invalid_schema:{exc}") from exc
+
+
+def _parse_native_dsml_call(text: str) -> dict[str, Any] | None:
+    """Convert one complete DeepSeek DSML call into the internal decision shape."""
+    normalized = text.replace("｜", "|")
+    normalized = re.sub(r"\|{2,}", "|", normalized)
+    normalized = re.sub(
+        r"<\|\s*dsml\s*\|\s*(calls|invoke|parameter)\b([^>]*)>",
+        lambda match: f"<dsml-{match.group(1).lower()}{match.group(2)}>",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"</\|\s*dsml\s*\|\s*(calls|invoke|parameter)\s*>",
+        lambda match: f"</dsml-{match.group(1).lower()}>",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    envelope = re.fullmatch(r"\s*<dsml-calls\s*>(.*?)</dsml-calls>\s*", normalized, re.IGNORECASE | re.DOTALL)
+    if not envelope:
+        return None
+    invokes = list(re.finditer(r'<dsml-invoke\s+name\s*=\s*(["\'])(.*?)\1\s*>(.*?)</dsml-invoke>', envelope.group(1), re.IGNORECASE | re.DOTALL))
+    if len(invokes) != 1:
+        return None
+    invocation = invokes[0]
+    tool_name = invocation.group(2).strip()
+    body = invocation.group(3)
+    arguments: dict[str, Any] = {}
+    cursor = 0
+    for match in re.finditer(r"<dsml-parameter\b([^>]*)>(.*?)</dsml-parameter>", body, re.IGNORECASE | re.DOTALL):
+        if body[cursor:match.start()].strip():
+            return None
+        attrs, raw_value = match.group(1), match.group(2)
+        name_match = re.search(r'\bname\s*=\s*(["\'])(.*?)\1', attrs, re.IGNORECASE)
+        if not name_match:
+            return None
+        name = name_match.group(2).strip()
+        if not name or name in arguments or re.search(r"<\|+dsml\|+", raw_value.replace("｜", "|"), re.IGNORECASE):
+            return None
+        value = raw_value.strip()
+        string_match = re.search(r'\bstring\s*=\s*(["\'])(.*?)\1', attrs, re.IGNORECASE)
+        if string_match and string_match.group(2).lower() == "true":
+            arguments[name] = value
+        else:
+            try:
+                arguments[name] = json.loads(value)
+            except (TypeError, ValueError):
+                arguments[name] = value
+        cursor = match.end()
+    if body[cursor:].strip():
+        return None
+    if not tool_name:
+        return None
+    return {"intent": "tool_call", "tool": tool_name, "arguments": arguments, "risk_level": "low",
+            "reason": "registered low-risk call recovered from DeepSeek DSML"}
 
 
 class ExistingProviderLLM:
