@@ -14,6 +14,18 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .bilibili import video_id
+from cognitive_core.runtime import logger
+
+
+def _safe_audio_error(exc):
+    """Keep useful provider diagnostics while removing credentials and URL tokens."""
+    value = str(exc or "")
+    value = re.sub(
+        r"(?i)(api[\s_-]*key|authorization|access[\s_-]*token|secret|password|cookie|sessdata)(\s*[:=]\s*)[^\s,;]+",
+        r"\1\2<redacted>", value,
+    )
+    value = re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?<query-redacted>", value)
+    return value[:180]
 
 
 class VideoService:
@@ -251,9 +263,18 @@ class VideoService:
                 if str(tts_config.get('type') or selected)!='alibl_stream':
                     raise ValueError('configured_tts_provider_not_supported_for_qq')
                 from core.providers.tts.alibl_stream import TTSProvider
-                provider=TTSProvider(tts_config,True)
                 instruction=str(arguments.get('instruction') or '自然平稳地说话。').strip()[:120]
-                audio=await provider.synthesize_wav(text,instruction=instruction)
+                try:
+                    provider=TTSProvider(tts_config,True)
+                    audio=await provider.synthesize_wav(text,instruction=instruction)
+                except Exception as exc:
+                    detail = _safe_audio_error(exc)
+                    logger.warning(f"qq audio phase=tts_synthesis_failed scope={scope} error_type={type(exc).__name__} detail={detail}")
+                    if isinstance(exc, ValueError) and "API key is not configured" in str(exc):
+                        code = "tts_api_key_missing"
+                    else:
+                        code = f"tts_synthesis_failed:{type(exc).__name__}"
+                    raise RuntimeError(code) from None
                 (folder/'voice.wav').write_bytes(audio)
                 suffix='wav'
             elif kind=='bilibili':
@@ -262,8 +283,13 @@ class VideoService:
                 end=float(arguments.get('to_seconds'))
                 if not (0<=start<end and end-start<=12):
                     raise ValueError('audio_clip_window_invalid')
-                await self.bridge({'operation':'audio_clip','video':video,'from':start,'to':end,
-                    'directory':str(folder)},timeout=180)
+                try:
+                    await self.bridge({'operation':'audio_clip','video':video,'from':start,'to':end,
+                        'directory':str(folder)},timeout=180)
+                except Exception as exc:
+                    detail = _safe_audio_error(exc)
+                    logger.warning(f"qq audio phase=bilibili_clip_failed scope={scope} video={video} error_type={type(exc).__name__} detail={detail}")
+                    raise RuntimeError(f"bilibili_clip_failed:{type(exc).__name__}") from None
                 suffix='mp3'
             else:
                 raise ValueError('audio_reply_type_invalid')
@@ -276,7 +302,9 @@ class VideoService:
                 reason='语境匹配的QQ语音消息',action_id='qq-audio:'+ident)
             sent=await self.sender(route['event_id'],action.to_dict())
             if not sent.success:
-                raise RuntimeError('NapCat audio delivery failed')
+                detail = _safe_audio_error(sent.error or "")
+                logger.warning(f"qq audio phase=napcat_delivery_failed scope={scope} error={detail or 'no_error_detail'}")
+                raise RuntimeError(f"napcat_delivery_failed:{detail or 'onebot_rejected'}")
             logger.info(f"qq audio delivered kind={kind} scope={scope}")
             return {'status':'sent','kind':kind,
                 'video':video if kind=='bilibili' else None,

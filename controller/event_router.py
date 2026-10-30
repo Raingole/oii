@@ -417,9 +417,22 @@ class EventRouter:
                 # longer-running media action completes. Correct any implied
                 # success with a deterministic status message based on the real
                 # delivery result.
+                failure = str(action_result.error or "audio_delivery_failed")
+                if "tts_api_key_missing" in failure:
+                    failure_text = 'TTS 语音合成失败：服务端没有加载语音服务密钥。'
+                elif "tts_synthesis_failed" in failure:
+                    failure_text = f'TTS 语音合成失败（{failure[:100]}）。'
+                elif "bilibili_clip_failed" in failure:
+                    failure_text = f'B站视频音频截取失败（{failure[:100]}）。'
+                elif "napcat_delivery_failed" in failure:
+                    failure_text = f'语音已生成，但 NapCat/QQ 拒绝了投递（{failure[:100]}）。'
+                elif "tool timeout" in failure.lower() or "timeout" in failure.lower():
+                    failure_text = '语音处理超时，没有确认送达；这次没有播放。'
+                else:
+                    failure_text = f'语音处理失败，没有确认送达（{failure[:100]}）。'
                 correction = Action.create('send_message', {
                     'session_id': event.session_id,
-                    'text': '刚才那段语音没有成功发出；这次没有播放。',
+                    'text': failure_text,
                     'platform': event.metadata.get('platform', 'napcat'),
                     'source_message_id': event.metadata.get('source_message_id', event.source_event_id),
                 }, channel=str(event.metadata.get('reply_channel') or 'qq'),
