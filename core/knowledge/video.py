@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .bilibili import video_id
+from cognitive_core.contracts import Action
 from cognitive_core.runtime import logger
 
 
