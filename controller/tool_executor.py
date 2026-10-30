@@ -41,6 +41,10 @@ class ToolExecutor:
             else: return {"tool":tool_name,"success":False,"error":"provider has no executor","provider":item.get("provider","")}
             if tool_name == "qq_send_tts_audio":
                 timeout = max(self.timeout, 240.0)
+            elif tool_name.startswith('douyin_visual_'):
+                # Screenshot interpretation is serial with visible browser
+                # actions, so a small number of model calls needs a wider cap.
+                timeout = max(self.timeout, 480.0)
             elif tool_name == "douyin_status":
                 # DouyinClient has a 120s request timeout and may also need to
                 # start its isolated Python MCP process on the first call.

@@ -73,6 +73,11 @@ class ActionDispatcher:
                             # the explicit audio tool instead of slowing every action.
                             action_timeout = max(action_timeout, 240.0)
                         elif (action.get("type") == "call_mcp" and isinstance(payload, dict)
+                                and str(payload.get("tool") or "").startswith("douyin_visual_")):
+                            # Visual browsing is a sequence of screenshot,
+                            # model inspection, and coordinate actions.
+                            action_timeout = max(action_timeout, 480.0)
+                        elif (action.get("type") == "call_mcp" and isinstance(payload, dict)
                                 and payload.get("tool") == "douyin_get_login_qrcode"):
                             # QR acquisition, image delivery and its OneBot echo
                             # can exceed the generic action deadline.

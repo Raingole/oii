@@ -154,7 +154,7 @@ class KnowledgeStore:
 
     def random_reference(self, scope, source_types=None):
         """Return one recent, source-backed learning chunk for contextual reflection."""
-        allowed=tuple(source_types or ('subtitle','ai_subtitle','asr','bilibili_meme_transcript','douyin_transcript','storyboard_sample'))
+        allowed=tuple(source_types or ('subtitle','ai_subtitle','asr','bilibili_meme_transcript','douyin_transcript','douyin_visual','storyboard_sample'))
         if not allowed:
             return None
         marks=','.join('?' for _ in allowed)

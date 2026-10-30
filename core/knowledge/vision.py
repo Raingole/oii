@@ -191,6 +191,27 @@ class VisualUnderstanding:
         self.provider=create_instance(settings.get('type',selected),settings)
         return self.provider
 
+    async def inspect_screenshot(self, image_bytes, question):
+        """Ask the configured vision model about a browser screenshot only."""
+        if not self.settings().get('enabled',False):
+            raise ValueError('vision_provider_disabled')
+        data=bytes(image_bytes)
+        if not data or len(data)>8*1024*1024:
+            raise ValueError('screenshot_size_invalid')
+        async with self.lock:
+            provider=self.get_provider()
+            encoded,_=await asyncio.to_thread(normalize_image,data)
+            raw=await asyncio.wait_for(asyncio.to_thread(provider.response,str(question)[:6000],encoded),
+                timeout=float(self.settings().get('timeout_seconds',25)))
+        raw=str(raw)
+        try:
+            parsed=json.loads(raw[raw.index('{'):raw.rindex('}')+1])
+        except (ValueError,TypeError):
+            raise ValueError('visual_response_invalid') from None
+        if not isinstance(parsed,dict):
+            raise ValueError('visual_response_invalid')
+        return parsed
+
     async def describe_many(self, scope, images):
         if not self.settings().get('enabled',False):
             return [{'status':'disabled'}]

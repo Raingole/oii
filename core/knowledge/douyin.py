@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import time
+from .douyin_visual import DouyinVisualFlow
 
 
 UPSTREAM_TOOLS = {
@@ -34,6 +35,8 @@ class DouyinClient:
         self.qr_state = {'status': 'idle'}
         self.qr_image = ''
         self.qr_expires = 0.0
+        self.visual_process = None
+        self.visual_lock = asyncio.Lock()
 
     def _environment(self):
         allowed = {
@@ -185,7 +188,67 @@ class DouyinClient:
                 await self.close()
                 raise
 
+    async def visual_command(self, command=None):
+        """Use a persistent headless browser through screenshots and coordinates only."""
+        async with self.visual_lock:
+            if self.visual_process is None or self.visual_process.returncode is not None:
+                helper = self.root / 'deploy/douyin/visual_browser.py'
+                if not helper.is_file() or not self.python.is_file():
+                    raise RuntimeError('douyin_visual_browser_runtime_missing')
+                self.visual_process = await asyncio.create_subprocess_exec(
+                    str(self.python), str(helper), cwd=self.root, env=self._environment(),
+                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL, limit=32 * 1024 * 1024,
+                )
+                response = await self._visual_response(75)
+            else:
+                response = None
+            if command is not None:
+                self.visual_process.stdin.write((json.dumps(command, ensure_ascii=False) + '\n').encode())
+                await self.visual_process.stdin.drain()
+                response = await self._visual_response(25)
+            elif response is None:
+                self.visual_process.stdin.write(b'{"op":"screenshot"}\n')
+                await self.visual_process.stdin.drain()
+                response = await self._visual_response(25)
+            if not response or response.get('ok') is not True:
+                error = str((response or {}).get('error') or 'douyin_visual_browser_failed')
+                await self._stop_visual_browser()
+                raise RuntimeError(error)
+            return response
+
+    async def _visual_response(self, timeout):
+        process = self.visual_process
+        if not process or not process.stdout:
+            raise RuntimeError('douyin_visual_browser_process_missing')
+        try:
+            line = await asyncio.wait_for(process.stdout.readline(), timeout=timeout)
+        except asyncio.TimeoutError:
+            await self._stop_visual_browser()
+            raise RuntimeError('douyin_visual_browser_timeout') from None
+        if not line:
+            await self._stop_visual_browser()
+            raise RuntimeError('douyin_visual_browser_process_exited')
+        try:
+            return json.loads(line.decode('utf-8'))
+        except (ValueError, UnicodeError):
+            await self._stop_visual_browser()
+            raise RuntimeError('douyin_visual_browser_invalid_response') from None
+
+    async def _stop_visual_browser(self):
+        process, self.visual_process = self.visual_process, None
+        if not process:
+            return
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+
     async def close(self):
+        await self._stop_visual_browser()
         process, self.process = self.process, None
         if process and process.returncode is None:
             try:
@@ -410,6 +473,7 @@ class DouyinService:
         self.root, self.config, self.core, self.store = Path(root), config or {}, core, store
         self.settings = self.config.get('douyin', {}) or {}
         self.client = DouyinClient(root, self.settings)
+        self.visual = DouyinVisualFlow(self.client, core, store)
         self.sender = None
 
     def enabled(self):
@@ -442,13 +506,13 @@ class DouyinService:
         ident = {'aweme_id': {'type': 'string'}}
         common_count = {'cursor': {'type': 'integer'}, 'count': {'type': 'integer'}}
         tools = [
-            self._tool('douyin_status', '检查抖音接入和登录状态；不会显示 Cookie。'),
-            self._tool('douyin_search', '按明确主题搜索抖音视频，只读。', {'query': {'type': 'string'}}, ['query']),
-            self._tool('douyin_homefeed', '读取少量抖音推荐流条目，只读；最多10条，不点赞、不关注、不评论。',
+            self._tool('douyin_status', '兼容旧版登录状态检查；不会显示 Cookie。'),
+            self._tool('douyin_search', '兼容旧版数据接口搜索；截图识别与坐标搜索请调用 douyin_visual_search。', {'query': {'type': 'string'}}, ['query']),
+            self._tool('douyin_homefeed', '兼容旧版推荐流接口；截图浏览视频画面和评论请调用 douyin_visual_browse。',
                        {'tag': {'type': 'string'}, 'count': {'type': 'integer'}}),
-            self._tool('douyin_learn_topic', '按用户指定主题立即搜索抖音，筛选相关视频，转写语音并整理评论，写入当前会话知识库。',
+            self._tool('douyin_learn_topic', '兼容旧版接口学习；通过截图识别、页面坐标操作和评论总结学习请调用 douyin_visual_learn_topic。',
                        {'query': {'type': 'string'}}, ['query']),
-            self._tool('douyin_learn_video', '学习用户提供的抖音视频链接或作品ID；需要可用 ASR 配置。',
+            self._tool('douyin_learn_video', '兼容旧版按作品链接或ID学习；需要ASR。视觉学习请使用 douyin_visual_learn_topic。',
                        {'video': {'type': 'string'}}, ['video']),
             self._tool('douyin_knowledge_search', '只检索当前会话从抖音学习的笔记和评论证据。',
                        {'query': {'type': 'string'}}, ['query']),
@@ -494,6 +558,15 @@ class DouyinService:
                        {'keyword': {'type': 'string'}, 'count': {'type': 'integer', 'minimum': 1, 'maximum': 5},
                         'sort_type': {'type': 'integer', 'enum': [0, 1, 2]}}, ['keyword']),
         ])
+        visual_tools = [
+            self._tool('douyin_visual_search', '【浏览器视觉模式】只通过无头浏览器截图识别和屏幕坐标搜索抖音，不解析作品链接、不读取作品数据接口。',
+                       {'query': {'type': 'string'}}, ['query']),
+            self._tool('douyin_visual_browse', '【浏览器视觉模式】通过截图浏览抖音推荐视频画面与评论，只读，不点赞、不关注、不发评论。',
+                       {'tag': {'type': 'string'}, 'count': {'type': 'integer'}}),
+            self._tool('douyin_visual_learn_topic', '【浏览器视觉模式】在抖音页面内搜索主题，通过截图识别视频画面、字幕和评论并写入知识库；不使用作品链接或接口。',
+                       {'query': {'type': 'string'}}, ['query']),
+        ]
+        tools = visual_tools + tools
         return tools
 
     async def execute(self, name, arguments, context):
@@ -502,6 +575,34 @@ class DouyinService:
         scope = str(context.get('session_id') or '')
         if not scope:
             raise ValueError('learning_session_required')
+        if name == 'douyin_visual_search':
+            query = str(arguments.get('query') or '')
+            if _contains_secret_marker(query):
+                raise ValueError('query_contains_private_credential_markers')
+            return await self.visual.search(query)
+        if name == 'douyin_visual_browse':
+            tag = str(arguments.get('tag') or 'all').strip().lower()
+            if tag not in self.TAGS:
+                raise ValueError('unsupported_douyin_feed_tag')
+            try:
+                count = max(1, min(3, int(arguments.get('count', 2))))
+            except (TypeError, ValueError):
+                count = 2
+            return await self.visual.browse(count, tag)
+        if name == 'douyin_visual_learn_topic':
+            query = str(arguments.get('query') or '')
+            if _contains_secret_marker(query):
+                raise ValueError('query_contains_private_credential_markers')
+            try:
+                return await self.visual.learn(scope, query)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                previous = self.store.state('douyin:last_run:' + scope)
+                failed_phase = previous.get('failed_phase') or previous.get('phase') or 'visual_searching'
+                self._status(scope, query, '', '', 'failed', error=_safe_error_code(exc),
+                             failed_phase=failed_phase)
+                raise
         if name == 'douyin_status':
             try:
                 status = await self.client.call('check_login_status', {})
@@ -603,8 +704,10 @@ class DouyinService:
                              error=_safe_error_code(exc), failed_phase=failed_phase)
                 raise
         if name == 'douyin_knowledge_search':
-            return {'references': self.store.search(scope, str(arguments.get('query') or ''),
-                                                     data_source='douyin_transcript')}
+            query = str(arguments.get('query') or '')
+            references = self.store.search(scope, query, data_source='douyin_transcript')
+            references.extend(self.store.search(scope, query, data_source='douyin_visual'))
+            return {'references': references[:12]}
         raise ValueError('unknown_douyin_tool')
 
     async def learn_topic(self, scope, query):
