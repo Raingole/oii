@@ -135,8 +135,13 @@ class DouyinClient:
                             'ProxyError': 'douyin_proxy_error',
                         }
                         if error_type == 'DataFetchError':
-                            if 'request blocked or empty response' in detail:
-                                code = 'douyin_response_blocked_or_empty'
+                            status_match = re.search(r'http\s+(\d{3})', detail)
+                            if status_match and int(status_match.group(1)) >= 400:
+                                code = f'douyin_http_{status_match.group(1)}'
+                            elif 'response blocked' in detail or 'request blocked' in detail:
+                                code = 'douyin_response_blocked'
+                            elif 'empty response' in detail:
+                                code = 'douyin_response_empty'
                             elif 'failed to parse response' in detail:
                                 code = 'douyin_response_invalid_json'
                             elif 'signing failed' in detail:

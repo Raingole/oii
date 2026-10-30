@@ -131,6 +131,11 @@ class EventRouter:
             error = specific_errors[0]
         elif error.strip().lower() in generic_errors:
             error = ''
+        error_lower = error.lower()
+        if any(marker in error_lower for marker in (
+                'douyin_response_blocked', 'douyin_response_empty', 'douyin_http_',
+                'douyin_network_', 'douyin_proxy_error')):
+            stage = 'douyin_api_request'
         if tool.startswith('douyin_'):
             learning = getattr(self.core, 'learning', None)
             store = getattr(learning, 'store', None)

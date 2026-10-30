@@ -247,8 +247,10 @@ class DouYinApiClient:
         else:
             response = await self._http_client.post(url, headers=headers)
 
-        if response.text == "" or response.text == "blocked":
-            raise DataFetchError("Request blocked or empty response")
+        if response.text == "":
+            raise DataFetchError(f"Empty response (HTTP {response.status_code})")
+        if response.text.strip().lower() == "blocked":
+            raise DataFetchError(f"Response blocked (HTTP {response.status_code})")
 
         try:
             return response.json()
