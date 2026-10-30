@@ -212,9 +212,17 @@ async def browser_login():
         started = time.monotonic()
         last_state = "waiting"
         while time.monotonic() - started < 120:
-            cookies = await context.cookies([HOME])
-            cookie_string = "; ".join(f'{item["name"]}={item["value"]}' for item in cookies)
-            if any(item.get("name") in {"sessionid", "sessionid_ss"} for item in cookies):
+            # Login callbacks can set cookies on .douyin.com, passport, or
+            # another Douyin subdomain. A URL-filtered lookup for www.douyin.com
+            # can therefore miss a successful confirmation.
+            cookies = await context.cookies()
+            relevant_cookies = [item for item in cookies if str(item.get("domain") or "").lstrip(".").lower().endswith(
+                ("douyin.com", "iesdouyin.com", "bytedance.com", "snssdk.com"))]
+            cookie_string = "; ".join(
+                f'{item["name"]}={item["value"]}' for item in relevant_cookies)
+            cookie_names = {str(item.get("name") or "").lower() for item in relevant_cookies}
+            auth_cookie_names = {"sessionid", "sessionid_ss", "sid_guard", "sid_tt"}
+            if cookie_names.intersection(auth_cookie_names):
                 emit("confirmed")
                 if not save_cookie(cookie_string):
                     emit("failed", error="douyin_qrcode_cookie_save_failed")
@@ -225,13 +233,27 @@ async def browser_login():
             # was scanned. Text varies across Douyin web releases.
             try:
                 body = (await page.locator("body").inner_text(timeout=1_000)).lower()
-                if any(phrase in body for phrase in ("已扫码", "请在手机确认", "确认登录")) and last_state != "scanned":
+                if any(phrase in body for phrase in (
+                    "已扫码", "请在手机确认", "确认登录", "扫码成功", "登录成功", "授权成功",
+                )) and last_state != "scanned":
                     last_state = "scanned"
                     emit("scanned")
             except Exception:
                 pass
             await page.wait_for_timeout(2_000)
-        emit("expired")
+        # Report a useful, non-sensitive terminal state instead of leaving the
+        # UI indefinitely at "waiting". Cookie values are never emitted.
+        remaining_cookie_names = sorted({
+            str(item.get("name") or "") for item in await context.cookies()
+            if str(item.get("name") or "").lower() in auth_cookie_names
+            and str(item.get("domain") or "").lstrip(".").lower().endswith(
+                ("douyin.com", "iesdouyin.com", "bytedance.com", "snssdk.com"))
+        })
+        if last_state == "scanned":
+            emit("failed", error="douyin_login_confirmed_but_auth_cookie_missing",
+                 auth_cookie_names=remaining_cookie_names)
+        else:
+            emit("expired", error="douyin_qrcode_expired")
         return 0
     finally:
         if browser:
