@@ -76,7 +76,11 @@ class ActionDispatcher:
                                 and payload.get("tool") == "douyin_get_login_qrcode"):
                             # QR acquisition, image delivery and its OneBot echo
                             # can exceed the generic action deadline.
-                            action_timeout = max(action_timeout, 60.0)
+                            # Headless Chromium startup plus first-page load can
+                            # exceed a minute on small cloud instances. Keep the
+                            # outer action alive long enough for the helper to
+                            # return its first structured QR result.
+                            action_timeout = max(action_timeout, 150.0)
                         elif (action.get("type") == "call_mcp" and isinstance(payload, dict)
                                 and payload.get("tool") == "douyin_status"):
                             # Match the Douyin client's 120s status-call timeout;

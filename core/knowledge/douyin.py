@@ -216,12 +216,21 @@ class DouyinClient:
             stderr=asyncio.subprocess.DEVNULL, limit=1024 * 1024,
         )
         try:
-            line = await asyncio.wait_for(self.qr_process.stdout.readline(), timeout=30)
-            payload = json.loads(line.decode('utf-8')) if line else {}
-        except (asyncio.TimeoutError, ValueError, UnicodeError):
-            self.qr_state = {'status': 'failed', 'error': 'douyin_qrcode_initialization_failed'}
+            line = await asyncio.wait_for(self.qr_process.stdout.readline(), timeout=120)
+        except asyncio.TimeoutError:
+            self.qr_state = {'status': 'failed', 'error': 'douyin_qrcode_initialization_timeout'}
             await self.stop_qr_login()
-            raise RuntimeError('douyin_qrcode_initialization_failed') from None
+            raise RuntimeError('douyin_qrcode_initialization_timeout') from None
+        if not line:
+            self.qr_state = {'status': 'failed', 'error': 'douyin_qrcode_process_exited'}
+            await self.stop_qr_login()
+            raise RuntimeError('douyin_qrcode_process_exited')
+        try:
+            payload = json.loads(line.decode('utf-8'))
+        except (ValueError, UnicodeError):
+            self.qr_state = {'status': 'failed', 'error': 'douyin_qrcode_invalid_helper_response'}
+            await self.stop_qr_login()
+            raise RuntimeError('douyin_qrcode_invalid_helper_response') from None
         if payload.get('status') != 'waiting' or not payload.get('image_base64'):
             self.qr_state = {'status': 'failed',
                              'error': str(payload.get('error') or 'douyin_qrcode_unavailable')}
