@@ -99,11 +99,13 @@ class EventRouter:
         generic_errors = {'failed', 'error', 'tool_failed', 'unknown_error'}
         specific_errors = []
         failed_result = False
+        provider = ''
         stack = [(outcome.result, 0)]
         while stack:
             value, depth = stack.pop()
             if not isinstance(value, dict) or depth > 4:
                 continue
+            provider = provider or str(value.get('provider') or '')
             if value.get('success') is False or str(value.get('status') or '').lower() in {'failed', 'error'}:
                 failed_result = True
             runtime = str(value.get('runtime') or '').lower()
@@ -113,10 +115,15 @@ class EventRouter:
             if runtime in {'missing', 'unavailable'}:
                 stage = 'runtime_startup'
                 specific_errors.append(str(value.get('error') or f'{tool}_runtime_{runtime}'))
+            error_type = str(value.get('error_type') or '').strip()
             for key in ('error', 'error_code', 'failure_category', 'reason'):
                 candidate = str(value.get(key) or '').strip()
                 if candidate and candidate.lower() not in generic_errors:
+                    if key == 'error' and error_type:
+                        candidate = f'{error_type}: {candidate}'
                     specific_errors.append(candidate)
+            if error_type and not value.get('error'):
+                specific_errors.append(error_type)
             for nested in value.values():
                 if isinstance(nested, dict):
                     stack.append((nested, depth + 1))
@@ -144,7 +151,8 @@ class EventRouter:
             return ''
         detail = safe_debug_detail(error)
         attempts = f'；尝试次数={outcome.attempts}' if outcome.attempts else ''
-        return f'调试信息：工具={tool}；阶段={stage}；状态={outcome.status}{attempts}；错误={detail or "unknown_error"}'
+        provider_label = f'；提供方={provider}' if provider else ''
+        return f'调试信息：工具={tool}{provider_label}；阶段={stage}；状态={outcome.status}{attempts}；错误={detail or "unknown_error"}'
 
     async def _send_private_debug(self, event: CognitiveEvent, text: str, dispatched: list) -> None:
         if (event.source != 'qq' or not str(event.session_id or '').startswith('qq:private:')

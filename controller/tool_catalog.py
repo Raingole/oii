@@ -19,4 +19,9 @@ class ToolCatalog:
             except Exception: continue
         return result
     async def find(self, name: str) -> dict[str, Any] | None:
-        return next((x for x in await self.discover() if x.get("name") == name or x.get("function",{}).get("name") == name), None)
+        matches = [x for x in await self.discover()
+                   if x.get("name") == name or x.get("function",{}).get("name") == name]
+        if name.startswith("douyin_"):
+            return next((item for item in matches if item.get("provider") == "learning"),
+                        matches[0] if matches else None)
+        return matches[0] if matches else None

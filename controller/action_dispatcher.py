@@ -67,6 +67,15 @@ class ActionDispatcher:
                             # the explicit audio tool instead of slowing every action.
                             action_timeout = max(action_timeout, 240.0)
                         result=await asyncio.wait_for(executor(executor_action),timeout=action_timeout)
+                        if action.get("type") == "call_mcp" and isinstance(result, dict) and result.get("success") is False:
+                            error_type = str(result.get("error_type") or "ToolError")
+                            error_detail = str(result.get("error") or "tool_failed")
+                            error = f"{error_type}: {error_detail}"
+                            current = self.outbox.get(aid); attempts = current["attempts"] if current else claimed["attempts"]
+                            if attempts < action_attempts:
+                                retry=time.time()+min(.1*attempts,1.0); self.outbox.transition(aid,"retrying",error,retry_at=retry); await asyncio.sleep(max(0,retry-time.time())); continue
+                            self.outbox.transition(aid,"failed",error)
+                            return ActionResult(aid,"failed",False,result=result,error=error,attempts=attempts)
                         if isinstance(result,dict) and result.get("status") in {"accepted","queued","started"}:
                             self._device_confirmations.setdefault(aid, asyncio.Event())
                             self.outbox.transition(aid,"retrying","awaiting external completion",retry_at=time.time()+self.timeout)

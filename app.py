@@ -22,6 +22,7 @@ from qq.gateway import QQGateway
 from qq.official_gateway import QQOfficialGateway
 from controller.tool_catalog import ToolCatalog
 from controller.tool_executor import ToolExecutor
+from cognitive_core.diagnostics import safe_debug_detail
 
 TAG = __name__
 logger = setup_logging()
@@ -193,8 +194,7 @@ async def main():
             tool_name = str(payload.get("tool", "")); arguments = payload.get("arguments", {})
             result = await tool_executor.execute(tool_name, arguments, {"action": action, "event_id": action.get("event_id", ""), "session_id":payload.get('session_id',''), "approval_validated": bool(action.get("_approval_validated"))})
             if not result.get("success"):
-                error_type = str(result.get("error_type") or "ToolError")
-                raise RuntimeError(f"{error_type}: {result.get('error', 'tool failed')}")
+                result["error"] = safe_debug_detail(result.get("error") or "tool_failed")
             return result
         ws_server.action_dispatcher.register("call_mcp", _mcp_executor)
     if ws_server.cognitive_runtime:
