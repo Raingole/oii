@@ -96,17 +96,34 @@ class EventRouter:
         tool = str(payload.get('tool') or 'unknown_tool')
         error = str(outcome.error or '')
         stage = 'tool_execution'
-        envelope = outcome.result if isinstance(outcome.result, dict) else {}
-        result = envelope.get('result') if isinstance(envelope.get('result'), dict) else {}
-        if not error and isinstance(result, dict):
-            runtime = str(result.get('runtime') or '')
+        generic_errors = {'failed', 'error', 'tool_failed', 'unknown_error'}
+        specific_errors = []
+        failed_result = False
+        stack = [(outcome.result, 0)]
+        while stack:
+            value, depth = stack.pop()
+            if not isinstance(value, dict) or depth > 4:
+                continue
+            if value.get('success') is False or str(value.get('status') or '').lower() in {'failed', 'error'}:
+                failed_result = True
+            runtime = str(value.get('runtime') or '').lower()
+            candidate_stage = value.get('phase') or value.get('stage')
+            if candidate_stage:
+                stage = str(candidate_stage)
             if runtime in {'missing', 'unavailable'}:
-                error = str(result.get('error') or f'{tool}_runtime_{runtime}')
                 stage = 'runtime_startup'
-            elif result.get('error'):
-                error = str(result.get('error'))
-            elif result.get('success') is False or result.get('status') in {'failed', 'error'}:
-                error = str(result.get('error') or result.get('status'))
+                specific_errors.append(str(value.get('error') or f'{tool}_runtime_{runtime}'))
+            for key in ('error', 'error_code', 'failure_category', 'reason'):
+                candidate = str(value.get(key) or '').strip()
+                if candidate and candidate.lower() not in generic_errors:
+                    specific_errors.append(candidate)
+            for nested in value.values():
+                if isinstance(nested, dict):
+                    stack.append((nested, depth + 1))
+        if specific_errors:
+            error = specific_errors[0]
+        elif error.strip().lower() in generic_errors:
+            error = ''
         if tool.startswith('douyin_'):
             learning = getattr(self.core, 'learning', None)
             store = getattr(learning, 'store', None)
@@ -121,12 +138,13 @@ class EventRouter:
                 if recent and state.get('status') == 'failed':
                     stage = str(state.get('phase') or stage)
                     error = str(state.get('error') or error)
-        if not error and not outcome.success:
-            error = outcome.status or 'tool_failed'
+        if not error and (not outcome.success or failed_result):
+            error = 'no_specific_error_returned'
         if not error:
             return ''
         detail = safe_debug_detail(error)
-        return f'调试信息：工具={tool}；阶段={stage}；状态={outcome.status}；错误={detail or "unknown_error"}'
+        attempts = f'；尝试次数={outcome.attempts}' if outcome.attempts else ''
+        return f'调试信息：工具={tool}；阶段={stage}；状态={outcome.status}{attempts}；错误={detail or "unknown_error"}'
 
     async def _send_private_debug(self, event: CognitiveEvent, text: str, dispatched: list) -> None:
         if (event.source != 'qq' or not str(event.session_id or '').startswith('qq:private:')
