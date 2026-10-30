@@ -175,7 +175,7 @@ learning:
 # temporary media remain under data/ and tmp/, never in the repository.
 douyin:
   enabled: true
-    timeout_seconds: 1800
+  timeout_seconds: 1800
   max_video_seconds: 1800
   cookie_path: data/douyin/cookies.txt
   download_dir: tmp/douyin/downloads
