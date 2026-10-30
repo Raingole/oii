@@ -23,6 +23,7 @@ from .prompt_builder import build_runtime_prompt
 from .llm import ExistingProviderLLM, validate_decision, LLMDecisionError
 from .observability import build_activity
 from .reply_parts import split_reply_parts
+from .diagnostics import safe_debug_detail
 
 
 class CognitiveCore:
@@ -147,10 +148,11 @@ class CognitiveCore:
                 generation["status"] = "retry_succeeded" if generation["attempts"] > 1 else "succeeded"
                 logger.info(f"llm decision generated trace_id={trace_id} intent={decision.get('intent', '')}")
             except Exception as exc:
-                generation.update(status="failed", error_type=type(exc).__name__)
+                generation.update(status="failed", error_type=type(exc).__name__,
+                                  debug=safe_debug_detail(exc))
                 decision = None
                 actions = [Action.create('do_nothing', reason='proactive generation failed')] if proactive else self._actions_from_decision({"intent": "reply", "message": "这次没能生成回复，请稍后再试。", "reason": "reply generation failed"}, event)
-                logger.warning(f"cognitive_llm_fallback reason={exc} trace_id={trace_id}")
+                logger.warning(f"cognitive_llm_fallback error_type={type(exc).__name__} debug={safe_debug_detail(exc)} trace_id={trace_id}")
         if self.learning and llm_used:
             try:
                 self.learning.observe(event,decision)

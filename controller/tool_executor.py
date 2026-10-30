@@ -48,7 +48,7 @@ class ToolExecutor:
             if isinstance(value, dict) and value.get("success") is False:
                 return {"tool":tool_name,"success":False,"error":str(value.get("error", "provider rejected tool")),"provider":item.get("provider","")}
             return {"tool":tool_name,"success":True,"result":self._jsonable(value),"provider":item.get("provider","")}
-        except asyncio.TimeoutError:return {"tool":tool_name,"success":False,"error":"tool timeout","provider":item.get("provider","")}
-        except (ValueError,TypeError) as exc:return {"tool":tool_name,"success":False,"error":f"invalid arguments: {exc}","provider":item.get("provider","")}
-        except PermissionError:return {"tool":tool_name,"success":False,"error":"permission denied","provider":item.get("provider","")}
-        except Exception as exc:return {"tool":tool_name,"success":False,"error":str(exc)[:300],"provider":item.get("provider","")}
+        except asyncio.TimeoutError:return {"tool":tool_name,"success":False,"error":"tool timeout","error_type":"TimeoutError","provider":item.get("provider","")}
+        except (ValueError,TypeError) as exc:return {"tool":tool_name,"success":False,"error":f"invalid arguments: {exc}","error_type":type(exc).__name__,"provider":item.get("provider","")}
+        except PermissionError as exc:return {"tool":tool_name,"success":False,"error":str(exc) or "permission denied","error_type":"PermissionError","provider":item.get("provider","")}
+        except Exception as exc:return {"tool":tool_name,"success":False,"error":str(exc)[:300],"error_type":type(exc).__name__,"provider":item.get("provider","")}

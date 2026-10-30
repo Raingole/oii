@@ -192,7 +192,9 @@ async def main():
             payload = action.get("payload", {})
             tool_name = str(payload.get("tool", "")); arguments = payload.get("arguments", {})
             result = await tool_executor.execute(tool_name, arguments, {"action": action, "event_id": action.get("event_id", ""), "session_id":payload.get('session_id',''), "approval_validated": bool(action.get("_approval_validated"))})
-            if not result.get("success"): raise RuntimeError(result.get("error", "tool failed"))
+            if not result.get("success"):
+                error_type = str(result.get("error_type") or "ToolError")
+                raise RuntimeError(f"{error_type}: {result.get('error', 'tool failed')}")
             return result
         ws_server.action_dispatcher.register("call_mcp", _mcp_executor)
     if ws_server.cognitive_runtime:

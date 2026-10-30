@@ -9,6 +9,7 @@ from cognitive_core.contracts import Action, CognitiveEvent
 from cognitive_core.runtime import CognitiveCore
 from .action_dispatcher import ActionDispatcher
 from contracts.results import ActionResult
+from cognitive_core.diagnostics import safe_debug_detail
 
 try:
     from loguru import logger
@@ -89,6 +90,59 @@ class EventRouter:
         if not action_result.success or not envelope.get('success'):
             return {'status':'failed'}
         return prepared
+
+    def _tool_debug(self, event: CognitiveEvent, action: dict[str, Any], outcome: ActionResult) -> str:
+        payload = action.get('payload', {}) if isinstance(action.get('payload'), dict) else {}
+        tool = str(payload.get('tool') or 'unknown_tool')
+        error = str(outcome.error or '')
+        stage = 'tool_execution'
+        envelope = outcome.result if isinstance(outcome.result, dict) else {}
+        result = envelope.get('result') if isinstance(envelope.get('result'), dict) else {}
+        if not error and isinstance(result, dict):
+            runtime = str(result.get('runtime') or '')
+            if runtime in {'missing', 'unavailable'}:
+                error = str(result.get('error') or f'{tool}_runtime_{runtime}')
+                stage = 'runtime_startup'
+            elif result.get('error'):
+                error = str(result.get('error'))
+            elif result.get('success') is False or result.get('status') in {'failed', 'error'}:
+                error = str(result.get('error') or result.get('status'))
+        if tool.startswith('douyin_'):
+            learning = getattr(self.core, 'learning', None)
+            store = getattr(learning, 'store', None)
+            scope = str(payload.get('session_id') or event.session_id or '')
+            if store is not None and scope:
+                try:
+                    state = store.state('douyin:last_run:' + scope)
+                    recent = 0 <= time.time() - float(state.get('at') or 0) <= 300
+                except Exception:
+                    state = {}
+                    recent = False
+                if recent and state.get('status') == 'failed':
+                    stage = str(state.get('phase') or stage)
+                    error = str(state.get('error') or error)
+        if not error and not outcome.success:
+            error = outcome.status or 'tool_failed'
+        if not error:
+            return ''
+        detail = safe_debug_detail(error)
+        return f'调试信息：工具={tool}；阶段={stage}；状态={outcome.status}；错误={detail or "unknown_error"}'
+
+    async def _send_private_debug(self, event: CognitiveEvent, text: str, dispatched: list) -> None:
+        if (event.source != 'qq' or not str(event.session_id or '').startswith('qq:private:')
+                or event.metadata.get('platform', 'napcat') != 'napcat' or not text):
+            return
+        action = Action.create('send_message', {
+            'session_id': event.session_id,
+            'text': safe_debug_detail(text, 380),
+            'platform': 'napcat',
+            'source_message_id': event.metadata.get('source_message_id', event.source_event_id),
+        }, channel=str(event.metadata.get('reply_channel') or 'qq'),
+           target=str(event.metadata.get('reply_target') or event.actor_id),
+           reason='向私聊用户直接发送脱敏调试信息')
+        result = await self.dispatcher.dispatch(event.event_id, action.to_dict())
+        dispatched.append(result.to_dict())
+        logger.info(f'private debug message sent event_id={event.event_id} delivered={result.success}')
 
     def session_busy(self, session_id: str) -> bool:
         lock = self._session_locks.get(session_id)
@@ -395,6 +449,9 @@ class EventRouter:
             logger.info(f"action result event_id={event.event_id} action_id={action_result.action_id} status={action_result.status} success={action_result.success}")
             dispatched.append(action_result.to_dict())
             payload = action.get("payload", {}) if isinstance(action.get("payload", {}), dict) else {}
+            tool_debug = self._tool_debug(event, action, action_result) if action.get('type') == 'call_mcp' else ''
+            if tool_debug:
+                await self._send_private_debug(event, tool_debug, dispatched)
             dsh_prepare_tool=(action.get('type')=='call_mcp' and payload.get('tool')=='dsh_prepare')
             if dsh_prepare_tool:
                 prepared=self._dsh_preparation_result(action_result)
@@ -463,7 +520,7 @@ class EventRouter:
                     "platform": event.metadata.get("platform", event.source),
                     "source_message_id": payload.get("source_message_id") or event.source_event_id,
                     "conversation_history": event.metadata.get("conversation_history", []),
-                    "followup_reply": action.get("type") == "call_mcp" and action_result.success and not payload.get('silent_followup') and not dsh_prepare_tool,
+                    "followup_reply": action.get("type") == "call_mcp" and action_result.success and not tool_debug and not payload.get('silent_followup') and not dsh_prepare_tool,
                     "proactive_parent": bool(event.metadata.get('proactive_thought')),
                 },
             )
@@ -498,6 +555,14 @@ class EventRouter:
                     break
             if action.get('payload', {}).get('reply_total') and action_result.status in {'failed', 'cancelled'}:
                 break
+        generation = result.get('generation') if isinstance(result.get('generation'), dict) else {}
+        if generation.get('status') == 'failed' and generation.get('error_type'):
+            debug = safe_debug_detail(generation.get('debug') or generation.get('error_type'))
+            await self._send_private_debug(
+                event,
+                f'调试信息：认知回复生成失败；错误类型={generation.get("error_type")}；详情={debug or "未提供"}',
+                dispatched,
+            )
         result["dispatched"] = dispatched
         result["feedback"] = feedback
         return result
