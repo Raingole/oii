@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import random
 import re
+import shutil
 import signal
 import time
 import uuid
@@ -42,6 +43,7 @@ class VideoService:
         self.root, self.config, self.store, self.core = Path(root), config, store, core
         self.directory = self.root/'data/video'
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.cleanup_stale_audio_artifacts()
         self.sender = None
         self.task = None
         self.auto_task = None
@@ -127,6 +129,14 @@ class VideoService:
         if not path.is_file() or path.stat().st_size>2*1024*1024:
             raise ValueError('audio_unavailable')
         return path
+
+    def cleanup_stale_audio_artifacts(self):
+        """Remove audio-only temporary artifacts left by a prior process crash."""
+        for folder in self.directory.iterdir():
+            if not folder.is_dir():
+                continue
+            if (folder/'voice.wav').exists() or (folder/'clip.mp3').exists():
+                shutil.rmtree(folder, ignore_errors=True)
 
     def folder(self, scope, ident):
         folder=self.directory/ident
@@ -255,6 +265,14 @@ class VideoService:
             kind=str(arguments.get('type') or '')
             ident=uuid.uuid4().hex
             folder=self.folder(scope,ident)
+            return await self.send_audio(arguments,scope,route,ident,folder,kind)
+        raise ValueError('unknown_video_tool')
+
+    async def send_audio(self, arguments, scope, route, ident, folder, kind):
+        """Generate/extract, send, and always remove the temporary audio artifact."""
+        video = None
+        start = end = None
+        try:
             if kind=='tts':
                 text=str(arguments.get('text') or '').strip()
                 if not 1<=len(text)<=300:
@@ -278,6 +296,7 @@ class VideoService:
                     raise RuntimeError(code) from None
                 (folder/'voice.wav').write_bytes(audio)
                 suffix='wav'
+                logger.info(f"qq audio phase=tts_synthesized scope={scope} bytes={len(audio)}")
             elif kind=='bilibili':
                 video=video_id(arguments.get('video',''))
                 start=float(arguments.get('from_seconds'))
@@ -297,7 +316,9 @@ class VideoService:
             (folder/'owner.json').write_text(json.dumps({'scope':scope,'kind':'audio'}),encoding='utf-8')
             audio_path=folder/f'voice.{suffix}' if kind=='tts' else folder/'clip.mp3'
             if not audio_path.is_file() or not 128<=audio_path.stat().st_size<=2*1024*1024:
-                raise ValueError('qq_audio_size_limit')
+                logger.warning(f"qq audio phase=audio_artifact_invalid scope={scope} kind={kind}")
+                raise ValueError('audio_artifact_invalid')
+            logger.info(f"qq audio phase=audio_ready scope={scope} kind={kind} bytes={audio_path.stat().st_size}")
             action=Action.create('send_message',{'session_id':scope,'text':str(arguments.get('caption') or '')[:160],
                 'audio_artifact':ident,'platform':'napcat'},channel='qq',target=route['target'],
                 reason='语境匹配的QQ语音消息',action_id='qq-audio:'+ident)
@@ -306,12 +327,11 @@ class VideoService:
                 detail = _safe_audio_error(sent.error or "")
                 logger.warning(f"qq audio phase=napcat_delivery_failed scope={scope} error={detail or 'no_error_detail'}")
                 raise RuntimeError(f"napcat_delivery_failed:{detail or 'onebot_rejected'}")
-            logger.info(f"qq audio delivered kind={kind} scope={scope}")
-            return {'status':'sent','kind':kind,
-                'video':video if kind=='bilibili' else None,
-                'from_seconds':start if kind=='bilibili' else None,
-                'to_seconds':end if kind=='bilibili' else None}
-        raise ValueError('unknown_video_tool')
+            logger.info(f"qq audio phase=delivered kind={kind} scope={scope}")
+            return {'status':'sent','kind':kind,'video':video,
+                'from_seconds':start,'to_seconds':end}
+        finally:
+            shutil.rmtree(folder,ignore_errors=True)
 
     async def send(self, route, ident, caption, seed):
         from cognitive_core.contracts import Action
