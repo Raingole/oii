@@ -23,6 +23,12 @@ class ActionDispatcher:
             # timeout is ambiguous: the message may already have reached QQ,
             # so retrying send_private_msg can create duplicate messages.
             action_attempts = 1 if action.get("type") == "send_message" and action.get("channel") == "qq" else self.max_attempts
+            dispatch_payload = action.get("payload", {})
+            if (action.get("type") == "call_mcp" and isinstance(dispatch_payload, dict)
+                    and dispatch_payload.get("tool") == "douyin_status"):
+                # A status probe already contains its own bounded request
+                # timeout; repeating a 120s probe three times delays diagnosis.
+                action_attempts = 1
             record=self.outbox.put(event_id,action,action_attempts); aid=record["action_id"]
             async with self._locks.setdefault(aid,asyncio.Lock()):
                 record=self.outbox.get(aid) or record
@@ -66,6 +72,11 @@ class ActionDispatcher:
                             # than ordinary chat actions. Keep this exception scoped to
                             # the explicit audio tool instead of slowing every action.
                             action_timeout = max(action_timeout, 240.0)
+                        elif (action.get("type") == "call_mcp" and isinstance(payload, dict)
+                                and payload.get("tool") == "douyin_status"):
+                            # Match the Douyin client's 120s status-call timeout;
+                            # otherwise this outer deadline cancels it first.
+                            action_timeout = max(action_timeout, 135.0)
                         result=await asyncio.wait_for(executor(executor_action),timeout=action_timeout)
                         if action.get("type") == "call_mcp" and isinstance(result, dict) and result.get("success") is False:
                             error_type = str(result.get("error_type") or "ToolError")
@@ -83,10 +94,13 @@ class ActionDispatcher:
                         self.outbox.transition(aid,"succeeded"); return ActionResult(aid,"succeeded",True,result=result,attempts=claimed["attempts"])
                     except asyncio.CancelledError:raise
                     except Exception as exc:
+                        exception_detail = str(exc).strip()
+                        failure_detail = (f"{type(exc).__name__}: {exception_detail}"
+                                          if exception_detail else type(exc).__name__)
                         current=self.outbox.get(aid); attempts=current["attempts"] if current else claimed["attempts"]
                         if attempts<action_attempts:
-                            retry=time.time()+min(.1*attempts,1.0); self.outbox.transition(aid,"retrying",str(exc),retry_at=retry); await asyncio.sleep(max(0,retry-time.time())); continue
-                        self.outbox.transition(aid,"failed",str(exc)); return ActionResult(aid,"failed",False,error=str(exc),attempts=attempts)
+                            retry=time.time()+min(.1*attempts,1.0); self.outbox.transition(aid,"retrying",failure_detail,retry_at=retry); await asyncio.sleep(max(0,retry-time.time())); continue
+                        self.outbox.transition(aid,"failed",failure_detail); return ActionResult(aid,"failed",False,error=failure_detail,attempts=attempts)
         finally:
             if task:self._inflight.discard(task)
     async def recover(self):
