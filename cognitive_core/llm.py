@@ -56,6 +56,21 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
     image_reply=value.get('image_reply',{})
     if not isinstance(image_reply,dict):
         image_reply={}
+    audio_reply=value.get('audio_reply',{})
+    if not isinstance(audio_reply,dict):
+        audio_reply={}
+    audio_type=str(audio_reply.get('type','') or '').strip().lower()
+    if audio_type not in {'tts','bilibili'}:
+        audio_reply={}
+    else:
+        audio_reply={
+            'type':audio_type,
+            'text':str(audio_reply.get('text','') or '')[:300],
+            'video':str(audio_reply.get('video','') or '')[:160],
+            'from_seconds':audio_reply.get('from_seconds'),
+            'to_seconds':audio_reply.get('to_seconds'),
+            'caption':str(audio_reply.get('caption','') or '')[:160],
+        }
     return {
         "intent": intent,
         "message": str(message),
@@ -73,6 +88,7 @@ def validate_decision(value: dict[str, Any]) -> dict[str, Any]:
         "goal_id": str(value.get("goal_id", "") or ""),
         "image_reply": {'query':str(image_reply.get('query','') or '')[:240],
                         'caption':str(image_reply.get('caption','') or '')[:240]},
+        "audio_reply": audio_reply,
     }
 
 

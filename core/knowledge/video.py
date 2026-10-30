@@ -22,7 +22,8 @@ class VideoService:
         'video_duration_limit','video_window_limit','video_screenshot_time_invalid','video_screenshot_invalid',
         'bilibili_wbi_unavailable','video_dependency_missing'}
     TOOLS = {'surfcore_video_info', 'surfcore_video_subtitles', 'bilibili_watch_video',
-             'bilibili_video_screenshot','video_job_status', 'qq_send_image', 'qq_send_relevant_image', 'bilibili_autoshare'}
+             'bilibili_video_screenshot','video_job_status', 'qq_send_image', 'qq_send_relevant_image',
+             'qq_send_tts_audio','bilibili_autoshare'}
 
     def __init__(self, root, config, store, core):
         self.root, self.config, self.store, self.core = Path(root), config, store, core
@@ -65,6 +66,9 @@ class VideoService:
             tool('video_job_status','查询当前会话的视频任务，完成后返回画面笔记、编号时间和可发图的artifact_id。',{'job_id':{'type':'string'}},['job_id']),
             tool('qq_send_image','向当前NapCat QQ私聊发送图片。提供当前会话artifact_id或公开https图片url，二选一。必须以工具送达结果为准。',
                 {'artifact_id':{'type':'string'},'url':{'type':'string'},'caption':{'type':'string'}}),
+            tool('qq_send_tts_audio','按当前阿里百炼 TTS 配置与流萤音色合成一条短语音并发送到当前QQ私聊。只在语境自然时调用。',
+                {'type':{'type':'string','enum':['tts','bilibili']},'text':{'type':'string'},'video':{'type':'string'},
+                 'from_seconds':{'type':'number'},'to_seconds':{'type':'number'},'caption':{'type':'string'}},['type']),
             tool('qq_send_relevant_image','从当前QQ私聊收到并保存在本地的图片库中，按语境挑一张合适的表情包或图片发出。仅当图片确实能自然补充当前回复时调用；先用具体语境描述检索，不要为了发图而发图。只会使用当前私聊用户自己的图片。',
                 {'query':{'type':'string','description':'当前对话里希望图片表达的含义、情绪或场景'},'caption':{'type':'string','description':'可选的简短配文'}},['query']),
             tool('bilibili_autoshare','查看或调整按聊天兴趣自主分享B站视频；每天最多分享数由中控限制。用户要求停止时设置enabled=false。',
@@ -96,6 +100,19 @@ class VideoService:
             path=folder/'sheet.jpg'
         if not path.is_file() or path.stat().st_size>5*1024*1024:
             raise ValueError('image_unavailable')
+        return path
+
+    def audio_artifact(self, scope, ident):
+        if not re.fullmatch(r'[0-9a-f]{32}',str(ident)):
+            raise ValueError('invalid_audio_artifact')
+        folder=self.directory/ident
+        metadata=json.loads((folder/'owner.json').read_text(encoding='utf-8'))
+        if metadata.get('scope')!=scope or metadata.get('kind')!='audio':
+            raise PermissionError('audio_scope_mismatch')
+        path=folder/'voice.wav'
+        if not path.is_file(): path=folder/'clip.mp3'
+        if not path.is_file() or path.stat().st_size>2*1024*1024:
+            raise ValueError('audio_unavailable')
         return path
 
     def folder(self, scope, ident):
@@ -215,6 +232,55 @@ class VideoService:
             if isinstance(result,dict):
                 result['image_match']={k:match['payload'].get(k) for k in ('kind','description','intent','context','usage_scenarios','expressed_emotions')}
             return result
+        if name=='qq_send_tts_audio':
+            route=self.route(context)
+            if not route or not self.sender:
+                raise ValueError('napcat_private_reply_required')
+            owner=str((self.config.get('qq') or {}).get('owner_qq') or '')
+            if not owner or route['target']!=owner:
+                raise PermissionError('owner_private_chat_required')
+            kind=str(arguments.get('type') or '')
+            ident=uuid.uuid4().hex
+            folder=self.folder(scope,ident)
+            if kind=='tts':
+                text=str(arguments.get('text') or '').strip()
+                if not 1<=len(text)<=300:
+                    raise ValueError('tts_text_length_invalid')
+                selected=str((self.config.get('selected_module') or {}).get('TTS') or '')
+                tts_config=(self.config.get('TTS') or {}).get(selected) or {}
+                if str(tts_config.get('type') or selected)!='alibl_stream':
+                    raise ValueError('configured_tts_provider_not_supported_for_qq')
+                from core.providers.tts.alibl_stream import TTSProvider
+                provider=TTSProvider(tts_config,True)
+                audio=await provider.synthesize_wav(text)
+                (folder/'voice.wav').write_bytes(audio)
+                suffix='wav'
+            elif kind=='bilibili':
+                video=video_id(arguments.get('video',''))
+                start=float(arguments.get('from_seconds'))
+                end=float(arguments.get('to_seconds'))
+                if not (0<=start<end and end-start<=12):
+                    raise ValueError('audio_clip_window_invalid')
+                await self.bridge({'operation':'audio_clip','video':video,'from':start,'to':end,
+                    'directory':str(folder)},timeout=180)
+                suffix='mp3'
+            else:
+                raise ValueError('audio_reply_type_invalid')
+            (folder/'owner.json').write_text(json.dumps({'scope':scope,'kind':'audio'}),encoding='utf-8')
+            audio_path=folder/f'voice.{suffix}' if kind=='tts' else folder/'clip.mp3'
+            if not audio_path.is_file() or not 128<=audio_path.stat().st_size<=2*1024*1024:
+                raise ValueError('qq_audio_size_limit')
+            action=Action.create('send_message',{'session_id':scope,'text':str(arguments.get('caption') or '')[:160],
+                'audio_artifact':ident,'platform':'napcat'},channel='qq',target=route['target'],
+                reason='语境匹配的QQ语音消息',action_id='qq-audio:'+ident)
+            sent=await self.sender(route['event_id'],action.to_dict())
+            if not sent.success:
+                raise RuntimeError('NapCat audio delivery failed')
+            logger.info(f"qq audio delivered kind={kind} scope={scope}")
+            return {'status':'sent','kind':kind,
+                'video':video if kind=='bilibili' else None,
+                'from_seconds':start if kind=='bilibili' else None,
+                'to_seconds':end if kind=='bilibili' else None}
         raise ValueError('unknown_video_tool')
 
     async def send(self, route, ident, caption, seed):

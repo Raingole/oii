@@ -113,9 +113,25 @@ async def main():
                     raise RuntimeError('Video artifact provider unavailable')
                 image = learning.video.artifact(str(payload.get('session_id','')),str(payload['image_artifact']))
                 message = image_segments(image.read_bytes(),message)
+            if payload.get('audio_artifact'):
+                import base64
+                learning = getattr(ws_server.cognitive_runtime, 'learning', None)
+                if not learning:
+                    raise RuntimeError('Audio artifact provider unavailable')
+                audio = learning.video.audio_artifact(str(payload.get('session_id','')),str(payload['audio_artifact']))
+                suffix=audio.suffix.lower()
+                if suffix not in {'.wav','.mp3'}:
+                    raise ValueError('Unsupported QQ audio format')
+                segments=[]
+                if message.strip():
+                    segments.append({'type':'text','data':{'text':message.strip()}})
+                segments.append({'type':'record','data':{'file':'base64://'+base64.b64encode(audio.read_bytes()).decode('ascii')}})
+                message=segments
             sent = await qq_gateway.send_private_message(user_id, message)
             if not sent:
                 raise RuntimeError("NapCat message delivery failed")
+            if payload.get('audio_artifact'):
+                audio.unlink(missing_ok=True)
             return {"status": "completed", "output_sent": True, "channel": "napcat"}
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     if ws_server.action_dispatcher is not None:

@@ -111,7 +111,7 @@ class CognitiveCore:
                     [m.text for m in memories],
                     event.to_dict(),
                     ([item for item in self.config.get("available_tools", [])
-                      if self._tool_name(item) in {'bilibili_video_screenshot','dsh_prepare'}] if proactive
+                      if self._tool_name(item) in {'bilibili_video_screenshot','dsh_prepare','qq_send_tts_audio'}] if proactive
                      else self.config.get("available_tools", [])),
                     str(self.config.get("persona_prompt", "")),
                     history,
@@ -288,6 +288,41 @@ class CognitiveCore:
                      'silent_followup':True},
                     target=self._reply_target(event),channel=str(event.metadata.get('reply_channel') or 'qq'),
                     risk_level='low',reason='按当前对话情绪匹配本地图片',requires_controller_approval=False))
+            audio_reply=decision.get('audio_reply') or {}
+            audio_type=str(audio_reply.get('type') or '')
+            if audio_type=='bilibili':
+                # Only share a clip when the model points to a Bilibili source
+                # and an evidence interval already present in retrieved notes.
+                import re
+                requested_video=re.search(r'BV[0-9A-Za-z]{10}',str(audio_reply.get('video') or ''))
+                try:
+                    clip_start=float(audio_reply.get('from_seconds'))
+                    clip_end=float(audio_reply.get('to_seconds'))
+                except (TypeError,ValueError):
+                    clip_start,clip_end=-1,-1
+                grounded=False
+                if requested_video and 0<=clip_start<clip_end and clip_end-clip_start<=12:
+                    for reference in references:
+                        source_video=re.search(r'BV[0-9A-Za-z]{10}',str(reference.get('url') or ''))
+                        start,end=reference.get('start'),reference.get('end')
+                        if source_video and source_video.group(0)==requested_video.group(0) and start is not None and end is not None and float(start)<=clip_start and clip_end<=float(end):
+                            grounded=True
+                            break
+                if not grounded:
+                    audio_reply={}
+                    audio_type=''
+            if (audio_type in {'tts','bilibili'} and event.source=='qq'
+                    and event.metadata.get('platform')=='napcat'
+                    and event.session_id.startswith('qq:private:')
+                    and 'qq_send_tts_audio' in {self._tool_name(item) for item in self.config.get('available_tools',[]) or []}):
+                args={key:audio_reply.get(key) for key in ('text','video','from_seconds','to_seconds','caption') if audio_reply.get(key) is not None}
+                args['type']=audio_type
+                actions.append(Action.create('call_mcp',
+                    {'tool':'qq_send_tts_audio','arguments':args,
+                     'session_id':event.session_id,'reply_target':self._reply_target(event),
+                     'reply_channel':'qq','platform':'napcat','silent_followup':True},
+                    target=self._reply_target(event),channel='qq',risk_level='low',
+                    reason='根据当前对话语境附加一条语音或B站短音频',requires_controller_approval=False))
             return actions
         if intent == "schedule":
             arguments = decision.get("arguments", {})

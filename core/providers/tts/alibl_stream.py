@@ -5,6 +5,8 @@ import time
 import queue
 import asyncio
 import traceback
+import io
+import wave
 import websockets
 
 from asyncio import Task
@@ -99,6 +101,63 @@ class TTSProvider(TTSProviderBase):
             self.ws = None
             self.last_active_time = None
             raise
+
+    async def synthesize_wav(self, text: str, sample_rate: int = 24000) -> bytes:
+        """Create a standalone WAV for QQ using the configured model and voice."""
+        if not self.api_key:
+            raise ValueError("TTS API key is not configured")
+        if not 1 <= len(str(text).strip()) <= 300:
+            raise ValueError("TTS text length must be between 1 and 300 characters")
+        task_id = uuid.uuid4().hex
+        audio = bytearray()
+        async with websockets.connect(
+            self.ws_url, additional_headers=self.header, ping_interval=30,
+            ping_timeout=10, close_timeout=10, max_size=10 * 1024 * 1024,
+        ) as ws:
+            await ws.send(json.dumps({
+                "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
+                "payload": {"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer",
+                    "model": self.model, "parameters": {"text_type": "PlainText", "voice": self.voice,
+                    "format": "pcm", "sample_rate": sample_rate, "volume": self.volume,
+                    "rate": self.rate, "pitch": self.pitch}, "input": {}},
+            }))
+            started = False
+            while not started:
+                message = await asyncio.wait_for(ws.recv(), timeout=30)
+                if isinstance(message, (bytes, bytearray)):
+                    audio.extend(message)
+                    continue
+                header = json.loads(message).get("header", {})
+                if header.get("event") == "task-started":
+                    started = True
+                elif header.get("event") == "task-failed":
+                    raise RuntimeError("TTS task failed to start")
+            filtered = MarkdownCleaner.clean_markdown(str(text).strip())
+            await ws.send(json.dumps({"header":{"action":"continue-task","task_id":task_id,"streaming":"duplex"},
+                "payload":{"input":{"text":filtered}}}))
+            await ws.send(json.dumps({"header":{"action":"finish-task","task_id":task_id,"streaming":"duplex"},
+                "payload":{"input":{}}}))
+            while True:
+                message = await asyncio.wait_for(ws.recv(), timeout=45)
+                if isinstance(message, (bytes, bytearray)):
+                    audio.extend(message)
+                    if len(audio) > 4 * 1024 * 1024:
+                        raise ValueError("TTS audio size limit exceeded")
+                    continue
+                header = json.loads(message).get("header", {})
+                if header.get("event") == "task-finished":
+                    break
+                if header.get("event") == "task-failed":
+                    raise RuntimeError("TTS synthesis failed")
+        if len(audio) < 128:
+            raise RuntimeError("TTS returned no audio")
+        output = io.BytesIO()
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(bytes(audio))
+        return output.getvalue()
 
     def tts_text_priority_thread(self):
         """流式TTS文本处理线程"""

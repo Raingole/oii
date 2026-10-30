@@ -51,6 +51,22 @@ async function main() {
         coverage:'single_video_frame',download,producer:'ffmpeg-linux-headless',frame_bytes:frame.bytes};
     } finally {await rm(file,{force:true});}
   }
+  if(opts.operation==='audio_clip') {
+    const from=Number(opts.from),to=Number(opts.to);
+    if(!Number.isFinite(from)||!Number.isFinite(to)||from<0||to<=from||to-from>12||to>view.duration) throw Error('video_window_limit');
+    const dir=resolve(opts.directory);await mkdir(dir,{recursive:true,mode:0o700});
+    const file=join(dir,'source.mp4'),clip=join(dir,'clip.mp3');
+    try {
+      const download=await api.download(bvid,view,file,160*1024*1024);
+      const ffmpeg=process.env.DSH_FFMPEG_PATH||process.env.FFMPEG_PATH||'ffmpeg';
+      await execFileAsync(ffmpeg,['-hide_banner','-loglevel','error','-nostdin','-ss',String(from),'-i',file,
+        '-t',String(to-from),'-vn','-ac','1','-ar','24000','-b:a','48k','-y',clip],
+        {timeout:60000,maxBuffer:1024*1024});
+      const audio=await readFile(clip);
+      if(audio.length<128||audio.length>2*1024*1024) throw Error('bilibili_size_limit');
+      return {...metadata,from,to,download,audio_bytes:audio.length};
+    } finally {await rm(file,{force:true});}
+  }
   const sub=await api.subtitles(bvid,view).catch(()=>({segments:[],source:'unavailable'}));
   if(opts.operation==='subtitles') return {...metadata,...sub,segments:sub.segments.slice(0,300)};
   if(opts.operation!=='storyboard') throw Error('unsupported_operation');
