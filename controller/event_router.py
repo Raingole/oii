@@ -147,7 +147,12 @@ class EventRouter:
                 'douyin_response_blocked', 'douyin_response_empty', 'douyin_http_',
                 'douyin_network_', 'douyin_proxy_error')):
             stage = 'douyin_api_request'
-        if tool.startswith('douyin_'):
+        # Learning progress is stored per session. Do not attach its most
+        # recent failure to unrelated successful Douyin tools (for example,
+        # a login-status probe), or the debug message reports a stale 403 as
+        # if that probe had failed.
+        if (tool in {'douyin_learn_topic', 'douyin_learn_video'}
+                and (not outcome.success or failed_result)):
             learning = getattr(self.core, 'learning', None)
             store = getattr(learning, 'store', None)
             scope = str(payload.get('session_id') or event.session_id or '')
