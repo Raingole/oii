@@ -101,17 +101,21 @@ async def browser_login():
 
         # Douyin changes class names regularly and may render the QR inside a
         # frame, canvas, SVG, or an image whose URL does not mention "qr".
-        # Search explicit QR selectors first, then any visible square graphic.
+        # Rank all candidates instead of taking the first square image: the
+        # page often contains clipped QR previews and unrelated icons.
         qr_locator = None
+        qr_selector = None
+        qr_score = -1
         qr_selectors = (
             '[role="dialog"] img[src*="qr"]', '[role="dialog"] canvas',
             '[class*="qrcode"] img', '[class*="qrCode"] img', '[class*="qr-code"] img',
             '[class*="qrcode"] canvas', '[class*="qrCode"] canvas', '[class*="qr-code"] canvas',
+            '[class*="qr"] img', '[class*="qr"] canvas', '[id*="qr"] img', '[id*="qr"] canvas',
             'img[src*="qrcode"]', 'img[src*="qr_code"]',
         )
         for _ in range(12):
             for frame in page.frames:
-                for selector in (*qr_selectors, 'canvas', 'img', 'svg'):
+                for selector in (*qr_selectors, 'canvas', 'img', 'svg', '[role="img"]'):
                     try:
                         candidates = frame.locator(selector)
                         for index in range(min(await candidates.count(), 80)):
@@ -122,20 +126,22 @@ async def browser_login():
                             if not box:
                                 continue
                             width, height = box["width"], box["height"]
-                            if selector in qr_selectors and 48 <= width <= 800 and 48 <= height <= 800:
+                            if not (100 <= width <= 700 and 100 <= height <= 700):
+                                continue
+                            ratio = width / max(height, 1)
+                            if not 0.92 <= ratio <= 1.08:
+                                continue
+                            metadata = await candidate.evaluate("el => [el.tagName, el.id, el.className, el.getAttribute('alt'), el.getAttribute('src'), el.getAttribute('aria-label')].join(' ').toLowerCase()")
+                            qr_hint = any(word in str(metadata) for word in ("qr", "qrcode", "qr-code", "二维码"))
+                            score = (1_000_000 if qr_hint else 0) + min(width * height, 490_000)
+                            if score > qr_score:
+                                qr_score = score
                                 qr_locator = candidate
-                                break
-                            if 100 <= width <= 800 and 100 <= height <= 800:
-                                ratio = width / max(height, 1)
-                                if 0.82 <= ratio <= 1.22:
-                                    qr_locator = candidate
-                                    break
+                                qr_selector = selector
                         if qr_locator:
-                            break
+                            continue
                     except Exception:
                         continue
-                if qr_locator:
-                    break
             if qr_locator:
                 break
             await page.wait_for_timeout(1_000)
@@ -147,11 +153,17 @@ async def browser_login():
                  login_text_visible=bool(await page.get_by_text("扫码登录", exact=True).count()))
             return 2
         try:
-            image_bytes = await qr_locator.screenshot(type="png", timeout=5_000)
+            # Screenshot the containing login dialog when available. This
+            # avoids sending a clipped child when the QR uses overflow/cover.
+            dialog = qr_locator.locator("xpath=ancestor::*[@role='dialog'][1]")
+            capture = dialog if await dialog.count() and await dialog.is_visible() else qr_locator
+            image_bytes = await capture.screenshot(type="png", timeout=5_000)
         except Exception as exc:
             emit("failed", error="douyin_browser_qrcode_capture_failed", error_type=type(exc).__name__)
             return 2
-        emit("waiting", image_base64=base64.b64encode(image_bytes).decode("ascii"), mode="headless_browser")
+        emit("waiting", image_base64=base64.b64encode(image_bytes).decode("ascii"),
+             mode="headless_browser", capture="login_dialog" if capture is not qr_locator else "qr_element",
+             qr_selector=qr_selector)
 
         started = time.monotonic()
         last_state = "waiting"
