@@ -58,18 +58,25 @@ from .models import (
 
 # 日志配置
 logger = logging.getLogger("douyinmcp")
+_ffmpeg_initialized = False
 
 
 def _init_ffmpeg():
     """初始化 static-ffmpeg，确保 ffmpeg 二进制可用。"""
+    global _ffmpeg_initialized
+    if _ffmpeg_initialized:
+        return True
     try:
         import static_ffmpeg
         static_ffmpeg.add_paths()
+        _ffmpeg_initialized = True
         logger.info("✅ ffmpeg 已就绪（static-ffmpeg）")
+        return True
     except ImportError:
         logger.warning("⚠️ static-ffmpeg 未安装，transcribe_video 将不可用")
     except Exception as e:
         logger.warning(f"⚠️ ffmpeg 初始化失败：{e}")
+    return False
 
 
 def _validate_cookie(raw: str, source: str) -> str:
@@ -300,9 +307,6 @@ async def _reset_client_cache() -> None:
 
 
 # ====== 初始化 ======
-
-# 确保 ffmpeg 可用
-_init_ffmpeg()
 
 # MCP 服务器实例
 mcp = FastMCP(
@@ -1054,6 +1058,11 @@ async def _transcribe_single(aweme_id: str) -> dict:
 
     返回转写结果 dict，如果失败抛出异常。
     """
+    # FFmpeg setup may download a binary on first use. Keep it out of module
+    # import so lightweight MCP operations (especially initialize/status) stay
+    # available on servers with restricted internet access.
+    _init_ffmpeg()
+
     from .video.audio import (
         download_video as _download,
         extract_audio,
