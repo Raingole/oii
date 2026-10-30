@@ -406,8 +406,7 @@ class DouyinService:
     def enabled(self):
         return bool(self.settings.get('enabled', False))
 
-    @staticmethod
-    def _route(context):
+    def _route(self, context):
         action = context.get('action') or {}
         payload = action.get('payload') or {}
         target = str(payload.get('reply_target') or '')
