@@ -121,6 +121,7 @@ class DouyinClient:
                             raise RuntimeError('douyin_response_not_structured') from None
                     if result.get('isError') or data.get('error') or data.get('success') is False:
                         error_type = data.get('error_type')
+                        detail = str(data.get('error') or '').lower()
                         safe_errors = {
                             'ASRNotConfiguredError': 'douyin_asr_not_configured',
                             'CookieExpiredError': 'douyin_cookie_expired',
@@ -128,9 +129,26 @@ class DouyinClient:
                             'NoSpeechDetectedError': 'douyin_no_speech',
                             'VideoDurationExceededError': 'douyin_video_too_long',
                             'FFmpegError': 'douyin_ffmpeg_error',
-                            'DataFetchError': 'douyin_data_fetch_error',
+                            'ConnectError': 'douyin_network_connection_error',
+                            'ConnectTimeout': 'douyin_network_connect_timeout',
+                            'ReadTimeout': 'douyin_network_read_timeout',
+                            'ProxyError': 'douyin_proxy_error',
                         }
-                        raise RuntimeError(safe_errors.get(error_type, 'douyin_upstream_error'))
+                        if error_type == 'DataFetchError':
+                            if 'request blocked or empty response' in detail:
+                                code = 'douyin_response_blocked_or_empty'
+                            elif 'failed to parse response' in detail:
+                                code = 'douyin_response_invalid_json'
+                            elif 'signing failed' in detail:
+                                code = 'douyin_signature_generation_failed'
+                            else:
+                                code = 'douyin_data_fetch_error'
+                        elif error_type == 'HTTPStatusError':
+                            match = re.search(r"\b([45]\d\d)\b", detail)
+                            code = f'douyin_http_{match.group(1)}' if match else 'douyin_http_status_error'
+                        else:
+                            code = safe_errors.get(error_type, 'douyin_upstream_error')
+                        raise RuntimeError(code)
                     return data
                 timeout = max(1.0, float(self.config.get('timeout_seconds', 120)))
                 if tool == 'check_login_status':

@@ -25,9 +25,9 @@ class ActionDispatcher:
             action_attempts = 1 if action.get("type") == "send_message" and action.get("channel") == "qq" else self.max_attempts
             dispatch_payload = action.get("payload", {})
             if (action.get("type") == "call_mcp" and isinstance(dispatch_payload, dict)
-                    and dispatch_payload.get("tool") == "douyin_status"):
-                # A status probe already contains its own bounded request
-                # timeout; repeating a 120s probe three times delays diagnosis.
+                    and str(dispatch_payload.get("tool") or "").startswith("douyin_")):
+                # Retrying read-only Douyin API calls can worsen rate limits;
+                # return the first structured failure for diagnosis instead.
                 action_attempts = 1
             record=self.outbox.put(event_id,action,action_attempts); aid=record["action_id"]
             async with self._locks.setdefault(aid,asyncio.Lock()):
