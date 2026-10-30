@@ -99,28 +99,52 @@ async def browser_login():
         except Exception:
             pass
 
+        # Douyin changes class names regularly and may render the QR inside a
+        # frame, canvas, SVG, or an image whose URL does not mention "qr".
+        # Search explicit QR selectors first, then any visible square graphic.
         qr_locator = None
-        for selector in (
+        qr_selectors = (
             '[role="dialog"] img[src*="qr"]', '[role="dialog"] canvas',
             '[class*="qrcode"] img', '[class*="qrCode"] img', '[class*="qr-code"] img',
-            'img[src*="qrcode"]', 'img[src*="qr_code"]', 'canvas',
-        ):
-            try:
-                candidates = page.locator(selector)
-                for index in range(min(await candidates.count(), 8)):
-                    candidate = candidates.nth(index)
-                    if not await candidate.is_visible():
+            '[class*="qrcode"] canvas', '[class*="qrCode"] canvas', '[class*="qr-code"] canvas',
+            'img[src*="qrcode"]', 'img[src*="qr_code"]',
+        )
+        for _ in range(12):
+            for frame in page.frames:
+                for selector in (*qr_selectors, 'canvas', 'img', 'svg'):
+                    try:
+                        candidates = frame.locator(selector)
+                        for index in range(min(await candidates.count(), 80)):
+                            candidate = candidates.nth(index)
+                            if not await candidate.is_visible():
+                                continue
+                            box = await candidate.bounding_box()
+                            if not box:
+                                continue
+                            width, height = box["width"], box["height"]
+                            if selector in qr_selectors and 48 <= width <= 800 and 48 <= height <= 800:
+                                qr_locator = candidate
+                                break
+                            if 100 <= width <= 800 and 100 <= height <= 800:
+                                ratio = width / max(height, 1)
+                                if 0.82 <= ratio <= 1.22:
+                                    qr_locator = candidate
+                                    break
+                        if qr_locator:
+                            break
+                    except Exception:
                         continue
-                    box = await candidate.bounding_box()
-                    if box and 100 <= box["width"] <= 600 and 100 <= box["height"] <= 600:
-                        qr_locator = candidate
-                        break
                 if qr_locator:
                     break
-            except Exception:
-                continue
+            if qr_locator:
+                break
+            await page.wait_for_timeout(1_000)
         if not qr_locator:
-            emit("failed", error="douyin_browser_qrcode_not_found")
+            # Do not include page text, cookies, or request headers in logs.
+            emit("failed", error="douyin_browser_qrcode_not_found",
+                 frame_count=len(page.frames), image_count=await page.locator("img").count(),
+                 canvas_count=await page.locator("canvas").count(),
+                 login_text_visible=bool(await page.get_by_text("扫码登录", exact=True).count()))
             return 2
         try:
             image_bytes = await qr_locator.screenshot(type="png", timeout=5_000)
