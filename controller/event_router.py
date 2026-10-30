@@ -68,6 +68,17 @@ def immediate_learning_retry(text: str) -> bool:
     ))
 
 
+def explicit_douyin_qr_login(text: str) -> bool:
+    """Recognize an explicit QR-login command, not discussion about QR login."""
+    value = str(text or '').strip()
+    if not value or not all(re.search(pattern, value, re.I) for pattern in (
+            r'抖音', r'(?:扫码|二维码)', r'(?:登录|登陆)')):
+        return False
+    if re.search(r'(?:为什么|为啥|怎么|是否|能不能|可不可以|吗|呢|[?？])', value):
+        return False
+    return bool(re.search(r'(?:给我|帮我|请|现在|重新|再|发我|生成|获取|开始|我要)', value))
+
+
 class EventRouter:
     """The only controller ingress into cognition and the only action handoff."""
     def __init__(self, core: CognitiveCore, dispatcher: ActionDispatcher):
@@ -191,6 +202,41 @@ class EventRouter:
         actor_qq=str(event.actor_id or '')
         if actor_qq.startswith('qq:'):
             actor_qq=actor_qq[3:]
+        qr_login_request = explicit_douyin_qr_login(meme_request)
+        if (learning is not None and qr_login_request and event.source == 'qq' and event.type == 'message'
+                and event.metadata.get('platform', 'napcat') == 'napcat'
+                and str(event.session_id or '').startswith('qq:private:')
+                and owner_qq and actor_qq == owner_qq):
+            reply_target = str(event.metadata.get('reply_target') or actor_qq)
+            self.core.store.runtime_set(f'contact:{self.core.agent_id}', {
+                'session_id': event.session_id, 'actor_id': event.actor_id, 'target': reply_target,
+                'platform': 'napcat', 'last_input_at': time.time(), 'event_id': event.event_id})
+            action = Action.create('call_mcp', {
+                'tool': 'douyin_get_login_qrcode', 'arguments': {}, 'session_id': event.session_id,
+                'reply_target': reply_target, 'reply_channel': event.metadata.get('reply_channel') or 'qq',
+                'platform': 'napcat'}, target=reply_target, channel='qq',
+                reason='用户明确要求获取抖音扫码登录二维码')
+            logger.info(f'douyin QR login requested event_id={event.event_id}; dispatching registered tool directly')
+            started = await self.dispatcher.dispatch(event.event_id, action.to_dict())
+            dispatched = [started.to_dict()]
+            envelope = started.result if isinstance(started.result, dict) else {}
+            tool_result = envelope.get('result') if isinstance(envelope.get('result'), dict) else {}
+            qr_result = tool_result.get('result') if isinstance(tool_result.get('result'), dict) else tool_result
+            if started.success and qr_result.get('delivered'):
+                message = '二维码已发到这条 QQ 私聊。请用抖音 App 扫码并在手机上确认登录。'
+                status = 'sent'
+            else:
+                message = self._tool_debug(event, action.to_dict(), started) or '抖音二维码没有发出；请稍后重试。'
+                status = 'failed'
+            response = Action.create('send_message', {
+                'session_id': event.session_id, 'text': message, 'platform': 'napcat'},
+                channel=str(event.metadata.get('reply_channel') or 'qq'), target=reply_target,
+                reason='如实告知抖音扫码二维码投递状态')
+            delivered = await self.dispatcher.dispatch(event.event_id, response.to_dict())
+            dispatched.append(delivered.to_dict())
+            logger.info(f'douyin QR login handled event_id={event.event_id} status={status} delivered={delivered.success}')
+            return {'event_id': event.event_id, 'actions': [action.to_dict(), response.to_dict()],
+                    'dispatched': dispatched, 'douyin_qr_login': status}
         topic_query=explicit_bilibili_topic(meme_request)
         retry_pending=immediate_learning_retry(meme_request)
         pending_interest=(learning.store.next_interest(event.session_id)

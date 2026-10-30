@@ -343,6 +343,10 @@ class CognitiveCore:
             available_tools = self.config.get("available_tools", []) or []
             allowed = {self._tool_name(item) for item in available_tools}
             if not tool or (available_tools and tool not in allowed):
+                logger.warning(
+                    f"cognitive_tool_rejected trace_id={event.event_id} requested_tool={tool or '<empty>'} "
+                    f"reason=not_registered available_tool_count={len(allowed)}"
+                )
                 return [Action.create("do_nothing", reason="LLM requested unavailable tool")]
             if decision.get("native_tool_markup"):
                 descriptor = next((item for item in available_tools if self._tool_name(item) == tool), None)
@@ -355,6 +359,11 @@ class CognitiveCore:
                     or (function.get("requires_controller_approval") if isinstance(function, dict) else False)
                 ) if isinstance(descriptor, dict) else True
                 if str(declared_risk or "").lower() != "low" or requires_tool_approval:
+                    logger.warning(
+                        f"cognitive_tool_rejected trace_id={event.event_id} requested_tool={tool} "
+                        f"reason=native_tool_markup_restricted risk={declared_risk or 'missing'} "
+                        f"approval_required={requires_tool_approval}"
+                    )
                     return [Action.create("do_nothing", reason="native tool markup is restricted to registered low-risk tools")]
             arguments = decision.get("arguments", {})
             if not isinstance(arguments, dict):
