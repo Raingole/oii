@@ -143,7 +143,7 @@ class EventRouter:
                     state = {}
                     recent = False
                 if recent and state.get('status') == 'failed':
-                    stage = str(state.get('phase') or stage)
+                    stage = str(state.get('failed_phase') or state.get('phase') or stage)
                     error = str(state.get('error') or error)
         if not error and (not outcome.success or failed_result):
             error = 'no_specific_error_returned'

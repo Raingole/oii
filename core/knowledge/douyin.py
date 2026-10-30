@@ -145,9 +145,16 @@ class DouyinClient:
                                 code = 'douyin_data_fetch_error'
                         elif error_type == 'HTTPStatusError':
                             match = re.search(r"\b([45]\d\d)\b", detail)
-                            code = f'douyin_http_{match.group(1)}' if match else 'douyin_http_status_error'
+                            code = f'douyin_http_{match.group(1)}' if match else 'douyin_upstream_http_status_error'
                         else:
-                            code = safe_errors.get(error_type, 'douyin_upstream_error')
+                            if error_type in safe_errors:
+                                code = safe_errors[error_type]
+                            elif error_type:
+                                safe_type = re.sub(r'(?<!^)(?=[A-Z])', '_', str(error_type))
+                                safe_type = re.sub(r'[^a-zA-Z0-9_]+', '_', safe_type).strip('_').lower()[:48]
+                                code = f'douyin_upstream_{safe_type}' if safe_type else 'douyin_upstream_error'
+                            else:
+                                code = 'douyin_upstream_error'
                         raise RuntimeError(code)
                     return data
                 timeout = max(1.0, float(self.config.get('timeout_seconds', 120)))
@@ -360,7 +367,10 @@ class DouyinService:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    self._status(scope, query, '', '', 'failed', error=_safe_error_code(exc))
+                    previous = self.store.state('douyin:last_run:' + scope)
+                    failed_phase = previous.get('failed_phase') or previous.get('phase') or 'searching'
+                    self._status(scope, query, previous.get('video_id', ''), previous.get('title', ''),
+                                 'failed', error=_safe_error_code(exc), failed_phase=failed_phase)
                     raise
             result = await self.client.call('search_videos', {
                 'keyword': query, 'count': 10, 'offset': 0, 'search_channel': 'video',
@@ -386,7 +396,10 @@ class DouyinService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self._status(scope, '', _video_id(value), '', 'failed', error=_safe_error_code(exc))
+                previous = self.store.state('douyin:last_run:' + scope)
+                failed_phase = previous.get('failed_phase') or previous.get('phase') or 'resolving_video'
+                self._status(scope, '', _video_id(value), previous.get('title', ''), 'failed',
+                             error=_safe_error_code(exc), failed_phase=failed_phase)
                 raise
         if name == 'douyin_knowledge_search':
             return {'references': self.store.search(scope, str(arguments.get('query') or ''),
@@ -420,6 +433,7 @@ class DouyinService:
         raise last_error or RuntimeError('no_relevant_douyin_video_candidate')
 
     async def learn_video(self, scope, value, *, card=None, topic=''):
+        self._status(scope, topic, '', '', 'resolving_video')
         ident = _video_id(value)
         if not ident:
             resolved = await self.client.call('resolve_share_url', {'share_url': value})
@@ -435,12 +449,13 @@ class DouyinService:
         if self.store.has_source(scope, url):
             return {'source_url': url, 'duplicate': True}
 
-        self._status(scope, topic, ident, (card or {}).get('title') or ident, 'fetching_douyin_comments')
+        self._status(scope, topic, ident, (card or {}).get('title') or ident, 'fetching_video_detail')
         detail_result = await self.client.call('get_video_detail', {'aweme_id': ident})
         detail = detail_result.get('video') if isinstance(detail_result.get('video'), dict) else detail_result
         detail_card = _video_card(detail)
         title = detail_card['title'] or (card or {}).get('title') or ident
         description = detail_card['description'] or (card or {}).get('description') or ''
+        self._status(scope, topic, ident, title, 'fetching_douyin_comments')
         try:
             comments_result = await self.client.call('get_video_comments', {'aweme_id': ident, 'cursor': 0, 'count': 20})
             rows = comments_result.get('comments') if isinstance(comments_result.get('comments'), list) else []
