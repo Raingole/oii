@@ -12,6 +12,7 @@ import json
 import logging
 import random
 import re
+import shutil
 import threading
 from urllib.parse import urlparse
 from dataclasses import asdict
@@ -65,6 +66,12 @@ def _init_ffmpeg():
     """初始化 static-ffmpeg，确保 ffmpeg 二进制可用。"""
     global _ffmpeg_initialized
     if _ffmpeg_initialized:
+        return True
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if ffmpeg and ffprobe:
+        _ffmpeg_initialized = True
+        logger.info("✅ 复用系统 FFmpeg：ffmpeg=%s；ffprobe=%s", ffmpeg, ffprobe)
         return True
     try:
         import static_ffmpeg
