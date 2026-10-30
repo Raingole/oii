@@ -146,58 +146,68 @@ async def browser_login():
                 break
             await page.wait_for_timeout(1_000)
         if not qr_locator:
-            # Do not include page text, cookies, or request headers in logs.
-            emit("failed", error="douyin_browser_qrcode_not_found",
+            # Some releases paint the QR as a CSS background or a clipped
+            # component that has no stable DOM dimensions. Send the rendered
+            # viewport as a safe fallback rather than failing or sending a
+            # cropped child element. It also makes a blocked/changed page
+            # visible for diagnosis without logging page text or cookies.
+            try:
+                image_bytes = await page.screenshot(type="png", full_page=False, timeout=10_000)
+            except Exception as exc:
+                emit("failed", error="douyin_browser_qrcode_capture_failed", error_type=type(exc).__name__)
+                return 2
+            emit("waiting", image_base64=base64.b64encode(image_bytes).decode("ascii"),
+                 mode="headless_browser", capture="page_viewport_fallback",
                  frame_count=len(page.frames), image_count=await page.locator("img").count(),
                  canvas_count=await page.locator("canvas").count(),
                  login_text_visible=bool(await page.get_by_text("扫码登录", exact=True).count()))
-            return 2
-        try:
-            # Export the source pixels for IMG/CANVAS directly. Element
-            # screenshots use the CSS display box, which can crop a QR when
-            # its parent applies object-fit/overflow or a transformed clip.
-            data_url = await qr_locator.evaluate("""el => {
-              try {
-                if (el instanceof HTMLCanvasElement) return el.toDataURL('image/png');
-                if (el instanceof HTMLImageElement && el.complete && el.naturalWidth && el.naturalHeight) {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = el.naturalWidth; canvas.height = el.naturalHeight;
-                  canvas.getContext('2d').drawImage(el, 0, 0);
-                  return canvas.toDataURL('image/png');
-                }
-              } catch (_) {}
-              return '';
-            }""")
-            if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
-                image_bytes = base64.b64decode(data_url.split(",", 1)[1])
-                capture_mode = "source_pixels"
-            else:
-                # Use a sufficiently large enclosing node if the QR is clipped
-                # as a child. Fall back to the whole viewport so we never send
-                # a tiny corner crop as if it were a complete QR.
-                capture = None
-                ancestor = qr_locator
-                for _ in range(6):
-                    ancestor = ancestor.locator("xpath=..")
-                    if not await ancestor.count() or not await ancestor.is_visible():
-                        break
-                    box = await ancestor.bounding_box()
-                    if box and box["width"] >= 180 and box["height"] >= 180:
-                        capture = ancestor
-                        if box["width"] <= 700 and box["height"] <= 700:
-                            break
-                if capture:
-                    image_bytes = await capture.screenshot(type="png", timeout=5_000)
-                    capture_mode = "enclosing_element"
+        else:
+            try:
+                # Export the source pixels for IMG/CANVAS directly. Element
+                # screenshots use the CSS display box, which can crop a QR when
+                # its parent applies object-fit/overflow or a transformed clip.
+                data_url = await qr_locator.evaluate("""el => {
+                  try {
+                    if (el instanceof HTMLCanvasElement) return el.toDataURL('image/png');
+                    if (el instanceof HTMLImageElement && el.complete && el.naturalWidth && el.naturalHeight) {
+                      const canvas = document.createElement('canvas');
+                      canvas.width = el.naturalWidth; canvas.height = el.naturalHeight;
+                      canvas.getContext('2d').drawImage(el, 0, 0);
+                      return canvas.toDataURL('image/png');
+                    }
+                  } catch (_) {}
+                  return '';
+                }""")
+                if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
+                    image_bytes = base64.b64decode(data_url.split(",", 1)[1])
+                    capture_mode = "source_pixels"
                 else:
-                    image_bytes = await page.screenshot(type="png", full_page=False, timeout=5_000)
-                    capture_mode = "page_viewport"
-        except Exception as exc:
-            emit("failed", error="douyin_browser_qrcode_capture_failed", error_type=type(exc).__name__)
-            return 2
-        emit("waiting", image_base64=base64.b64encode(image_bytes).decode("ascii"),
-             mode="headless_browser", capture=capture_mode,
-             qr_selector=qr_selector)
+                    # Use a sufficiently large enclosing node if the QR is clipped
+                    # as a child. Fall back to the whole viewport so we never send
+                    # a tiny corner crop as if it were a complete QR.
+                    capture = None
+                    ancestor = qr_locator
+                    for _ in range(6):
+                        ancestor = ancestor.locator("xpath=..")
+                        if not await ancestor.count() or not await ancestor.is_visible():
+                            break
+                        box = await ancestor.bounding_box()
+                        if box and box["width"] >= 180 and box["height"] >= 180:
+                            capture = ancestor
+                            if box["width"] <= 700 and box["height"] <= 700:
+                                break
+                    if capture:
+                        image_bytes = await capture.screenshot(type="png", timeout=5_000)
+                        capture_mode = "enclosing_element"
+                    else:
+                        image_bytes = await page.screenshot(type="png", full_page=False, timeout=5_000)
+                        capture_mode = "page_viewport"
+            except Exception as exc:
+                emit("failed", error="douyin_browser_qrcode_capture_failed", error_type=type(exc).__name__)
+                return 2
+            emit("waiting", image_base64=base64.b64encode(image_bytes).decode("ascii"),
+                 mode="headless_browser", capture=capture_mode,
+                 qr_selector=qr_selector)
 
         started = time.monotonic()
         last_state = "waiting"
