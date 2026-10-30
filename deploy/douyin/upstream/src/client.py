@@ -255,7 +255,10 @@ class DouYinApiClient:
         try:
             return response.json()
         except json.JSONDecodeError as e:
-            raise DataFetchError(f"Failed to parse response: {e}")
+            content_type = response.headers.get("content-type", "unknown").split(";", 1)[0][:80]
+            raise DataFetchError(
+                f"Failed to parse response (HTTP {response.status_code}, Content-Type {content_type})"
+            ) from None
 
     async def check_login_status(self) -> bool:
         """

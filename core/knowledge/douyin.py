@@ -138,6 +138,8 @@ class DouyinClient:
                             status_match = re.search(r'http\s+(\d{3})', detail)
                             if status_match and int(status_match.group(1)) >= 400:
                                 code = f'douyin_http_{status_match.group(1)}'
+                            elif 'content-type text/html' in detail or 'content-type application/xhtml' in detail:
+                                code = 'douyin_non_json_html_response'
                             elif 'response blocked' in detail or 'request blocked' in detail:
                                 code = 'douyin_response_blocked'
                             elif 'empty response' in detail:
