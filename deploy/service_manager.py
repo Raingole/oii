@@ -247,15 +247,15 @@ def prepare_dependencies(*, skip_python=False):
                 if not interpreter.is_file():
                     info('Creating isolated Douyin Python runtime')
                     run([python, '-m', 'venv', venv])
-                info('Preparing isolated Douyin read-only learning integration')
+                info('Preparing isolated Douyin integration and OCR runtime')
                 uv = shutil.which('uv')
                 if uv:
                     install_env = {**os.environ, 'UV_PROJECT_ENVIRONMENT': str(venv)}
-                    result = run([uv, 'sync', '--locked', '--no-dev'], cwd=source, env=install_env,
+                    result = run([uv, 'sync', '--locked', '--no-dev', '--extra', 'ocr'], cwd=source, env=install_env,
                                  capture=True, check=False)
                 else:
                     result = run([interpreter, '-m', 'pip', 'install', '--disable-pip-version-check',
-                                  '--no-warn-script-location', '-e', source], cwd=source,
+                                  '--no-warn-script-location', '-e', f'{source}[ocr]'], cwd=source,
                                  capture=True, check=False)
                 if result.returncode == 0:
                     stamp['douyin-mcp'] = wanted

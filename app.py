@@ -114,6 +114,19 @@ async def main():
                     raise RuntimeError('Video artifact provider unavailable')
                 image = learning.video.artifact(str(payload.get('session_id','')),str(payload['image_artifact']))
                 message = image_segments(image.read_bytes(),message)
+            elif payload.get('image_base64'):
+                import base64
+                from qq.media import image_segments
+                encoded = str(payload['image_base64'])
+                if len(encoded) > 3 * 1024 * 1024:
+                    raise ValueError('QQ image payload exceeds size limit')
+                try:
+                    image_bytes = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError):
+                    raise ValueError('Invalid base64 image payload') from None
+                if not image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+                    raise ValueError('Only PNG image payloads are accepted')
+                message = image_segments(image_bytes, message)
             if payload.get('audio_artifact'):
                 import base64
                 learning = getattr(ws_server.cognitive_runtime, 'learning', None)
@@ -173,6 +186,7 @@ async def main():
         if ws_server.cognitive_runtime and ws_server.cognitive_runtime.learning:
             catalog.register('learning',_DynamicProvider(lambda: ws_server.cognitive_runtime.learning, direct=True))
             ws_server.cognitive_runtime.learning.video.sender = ws_server.action_dispatcher.dispatch
+            ws_server.cognitive_runtime.learning.douyin.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.learning.dsh.sender = ws_server.action_dispatcher.dispatch
             ws_server.cognitive_runtime.core.config.setdefault('available_tools',[]).extend(await ws_server.cognitive_runtime.learning.discover())
         tool_executor = ToolExecutor(catalog, timeout=float(config.get("cognitive_core", {}).get("action_timeout", 15)))

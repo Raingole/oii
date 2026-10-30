@@ -45,6 +45,14 @@ class ToolExecutor:
                 # DouyinClient has a 120s request timeout and may also need to
                 # start its isolated Python MCP process on the first call.
                 timeout = max(self.timeout, 130.0)
+            elif tool_name.startswith('douyin_'):
+                # Upstream Douyin operations can download media and run ASR;
+                # keep the controller's generic 15s ceiling from aborting them.
+                media_operation = any(token in tool_name for token in (
+                    'transcribe', 'download', 'learn_topic', 'learn_video',
+                ))
+                timeout = max(self.timeout, 1800.0 if media_operation else
+                              130.0 if tool_name in {'douyin_status', 'douyin_check_login_status'} else 180.0)
             else:
                 timeout = self.timeout
             if hasattr(value,"__await__"): value=await asyncio.wait_for(value,timeout=timeout)

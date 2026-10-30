@@ -1,4 +1,4 @@
-"""Read-only OII bridge to the vendored Douyin MCP runtime."""
+"""OII bridge to the vendored Douyin MCP runtime."""
 import asyncio
 import json
 import os
@@ -7,9 +7,11 @@ import re
 import time
 
 
-READ_TOOLS = {
-    'check_login_status', 'search_videos', 'get_homefeed', 'get_video_detail',
-    'get_video_comments', 'transcribe_video', 'resolve_share_url',
+UPSTREAM_TOOLS = {
+    'check_login_status', 'logout', 'search_videos', 'get_video_detail',
+    'get_video_comments', 'get_sub_comments', 'get_user_info', 'get_user_posts',
+    'get_homefeed', 'resolve_share_url', 'download_video', 'download_aweme_images',
+    'ocr_aweme_images', 'transcribe_video', 'batch_transcribe',
 }
 
 
@@ -27,6 +29,11 @@ class DouyinClient:
         self.lock = asyncio.Lock()
         self.sequence = 0
         self.last_stage = 'process_startup'
+        self.qr_process = None
+        self.qr_task = None
+        self.qr_state = {'status': 'idle'}
+        self.qr_image = ''
+        self.qr_expires = 0.0
 
     def _environment(self):
         allowed = {
@@ -104,8 +111,8 @@ class DouyinClient:
         self.last_stage = 'ready'
 
     async def call(self, tool, arguments=None):
-        if tool not in READ_TOOLS:
-            raise ValueError('only_read_only_douyin_tools_allowed')
+        if tool not in UPSTREAM_TOOLS:
+            raise ValueError('unknown_douyin_upstream_tool')
         async with self.lock:
             try:
                 async def invoke():
@@ -193,6 +200,81 @@ class DouyinClient:
                 except ProcessLookupError:
                     pass
                 await process.wait()
+
+    async def start_qr_login(self):
+        if self.qr_process and self.qr_process.returncode is None and self.qr_image and time.time() < self.qr_expires:
+            return {'status': self.qr_state.get('status', 'waiting'), 'image_base64': self.qr_image,
+                    'expires_at': self.qr_expires}
+        await self.stop_qr_login()
+        helper = self.root / 'deploy/douyin/qr_login.py'
+        if not helper.is_file() or not self.python.is_file():
+            raise RuntimeError('douyin_runtime_missing')
+        env = self._environment()
+        self.qr_process = await asyncio.create_subprocess_exec(
+            str(self.python), str(helper), cwd=self.project, env=env,
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, limit=1024 * 1024,
+        )
+        try:
+            line = await asyncio.wait_for(self.qr_process.stdout.readline(), timeout=30)
+            payload = json.loads(line.decode('utf-8')) if line else {}
+        except (asyncio.TimeoutError, ValueError, UnicodeError):
+            self.qr_state = {'status': 'failed', 'error': 'douyin_qrcode_initialization_failed'}
+            await self.stop_qr_login()
+            raise RuntimeError('douyin_qrcode_initialization_failed') from None
+        if payload.get('status') != 'waiting' or not payload.get('image_base64'):
+            self.qr_state = {'status': 'failed',
+                             'error': str(payload.get('error') or 'douyin_qrcode_unavailable')}
+            await self.stop_qr_login()
+            raise RuntimeError(str(payload.get('error') or 'douyin_qrcode_unavailable'))
+        self.qr_state = {'status': 'waiting'}
+        self.qr_image = str(payload['image_base64'])
+        self.qr_expires = time.time() + 120
+        self.qr_task = asyncio.create_task(self._watch_qr_login())
+        return {'status': 'waiting', 'image_base64': self.qr_image, 'expires_at': self.qr_expires}
+
+    async def _watch_qr_login(self):
+        process = self.qr_process
+        if not process:
+            return
+        try:
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                try:
+                    data = json.loads(line.decode('utf-8'))
+                except (ValueError, UnicodeError):
+                    continue
+                status = str(data.get('status') or '')
+                if status in {'scanned', 'confirmed', 'expired', 'failed'}:
+                    self.qr_state = {'status': status}
+                if status == 'completed':
+                    self.qr_state = {'status': 'completed'}
+                elif status == 'failed':
+                    self.qr_state = {'status': 'failed', 'error': str(data.get('error') or 'douyin_qrcode_failed')}
+            await process.wait()
+            if self.qr_state.get('status') in {'waiting', 'scanned', 'confirmed'}:
+                self.qr_state = {'status': 'expired' if process.returncode == 0 else 'failed',
+                                 **({'error': 'douyin_qrcode_failed'} if process.returncode else {})}
+        finally:
+            self.qr_image = ''
+
+    async def stop_qr_login(self):
+        process, self.qr_process = self.qr_process, None
+        task, self.qr_task = self.qr_task, None
+        if process and process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self.qr_image = ''
+        self.qr_expires = 0.0
 
 
 def _rows(value):
@@ -310,7 +392,7 @@ def _transcript_chunks(text):
 
 
 class DouyinService:
-    """OII-facing read-only Douyin tools plus source-backed learning."""
+    """OII bridge to every upstream Douyin tool plus source-backed learning."""
 
     TAGS = {'all', 'knowledge', 'sports', 'auto', 'anime', 'game', 'movie', 'life_vlog',
             'travel', 'mini_drama', 'food', 'agriculture', 'music', 'animal', 'parenting', 'fashion'}
@@ -319,19 +401,39 @@ class DouyinService:
         self.root, self.config, self.core, self.store = Path(root), config or {}, core, store
         self.settings = self.config.get('douyin', {}) or {}
         self.client = DouyinClient(root, self.settings)
+        self.sender = None
 
     def enabled(self):
         return bool(self.settings.get('enabled', False))
 
     @staticmethod
-    def _tool(name, description, properties=None, required=()):
+    def _route(context):
+        action = context.get('action') or {}
+        payload = action.get('payload') or {}
+        target = str(payload.get('reply_target') or '')
+        if target.startswith('qq:'):
+            target = target[3:]
+        scope = str(context.get('session_id') or '')
+        if (payload.get('reply_channel') != 'qq' or payload.get('platform') != 'napcat'
+                or not re.fullmatch(r'\d{5,20}', target) or scope != 'qq:private:' + target):
+            return None
+        owner = str(((self.config.get('qq') or {}).get('owner_qq') or '')).strip()
+        if not owner or target != owner:
+            return None
+        return {'scope': scope, 'target': target, 'event_id': str(context.get('event_id') or '')}
+
+    @staticmethod
+    def _tool(name, description, properties=None, required=(), *, risk='low', approval=False):
         return {'name': name, 'description': description, 'parameters': {
-            'type': 'object', 'properties': properties or {}, 'required': list(required)}, 'risk_level': 'low'}
+            'type': 'object', 'properties': properties or {}, 'required': list(required)},
+            'risk_level': risk, 'requires_controller_approval': approval}
 
     def discover(self):
         if not self.enabled():
             return []
-        return [
+        ident = {'aweme_id': {'type': 'string'}}
+        common_count = {'cursor': {'type': 'integer'}, 'count': {'type': 'integer'}}
+        tools = [
             self._tool('douyin_status', '检查抖音接入和登录状态；不会显示 Cookie。'),
             self._tool('douyin_search', '按明确主题搜索抖音视频，只读。', {'query': {'type': 'string'}}, ['query']),
             self._tool('douyin_homefeed', '读取少量抖音推荐流条目，只读；最多10条，不点赞、不关注、不评论。',
@@ -343,6 +445,48 @@ class DouyinService:
             self._tool('douyin_knowledge_search', '只检索当前会话从抖音学习的笔记和评论证据。',
                        {'query': {'type': 'string'}}, ['query']),
         ]
+        # Expose the complete upstream MCP surface, including the login flow.
+        # The QR implementation is OII-managed so its image reaches the QQ user.
+        tools.extend([
+            self._tool('douyin_check_login_status', '上游原版：检查当前抖音 Cookie 登录状态。'),
+            self._tool('douyin_logout', '清除本地抖音登录 Cookie；会使当前登录失效。',
+                       risk='high', approval=True),
+            self._tool('douyin_search_videos', '上游原版：搜索抖音视频，支持分页、频道、排序和发布时间筛选。',
+                       {'keyword': {'type': 'string'}, 'offset': {'type': 'integer'}, 'count': {'type': 'integer'},
+                        'search_channel': {'type': 'string', 'enum': ['general', 'video', 'user', 'live']},
+                        'sort_type': {'type': 'integer', 'enum': [0, 1, 2]},
+                        'publish_time': {'type': 'integer', 'enum': [0, 1, 7, 180]}}, ['keyword']),
+            self._tool('douyin_get_video_detail', '上游原版：读取作品详情与作者、统计数据。', ident, ['aweme_id']),
+            self._tool('douyin_get_video_comments', '上游原版：分页读取作品评论。',
+                       {**ident, **common_count, 'source_keyword': {'type': 'string'}}, ['aweme_id']),
+            self._tool('douyin_get_sub_comments', '上游原版：分页读取评论回复。',
+                       {'comment_id': {'type': 'string'}, **common_count,
+                        'source_keyword': {'type': 'string'}}, ['comment_id']),
+            self._tool('douyin_get_user_info', '上游原版：按 sec_user_id 读取用户资料。',
+                       {'sec_user_id': {'type': 'string'}}, ['sec_user_id']),
+            self._tool('douyin_get_user_posts', '上游原版：分页读取用户作品。',
+                       {'sec_user_id': {'type': 'string'}, 'max_cursor': {'type': 'string'},
+                        'count': {'type': 'integer'}}, ['sec_user_id']),
+            self._tool('douyin_get_homefeed', '上游原版：按分类读取抖音推荐流。',
+                       {'tag': {'type': 'string', 'enum': sorted(self.TAGS)},
+                        'count': {'type': 'integer'}, 'refresh_index': {'type': 'integer'}}),
+            self._tool('douyin_get_login_qrcode', '启动官方抖音扫码登录，二维码图片会直接发到当前 QQ 私聊；手机确认后 Cookie 自动保存。'),
+            self._tool('douyin_login_status', '查看抖音二维码登录当前状态；不会展示 Cookie。'),
+            self._tool('douyin_resolve_share_url', '上游原版：解析抖音分享短链接并读取作品详情。',
+                       {'share_url': {'type': 'string'}}, ['share_url']),
+            self._tool('douyin_download_video', '上游原版：将用户指定的抖音作品下载到 OII 管理的下载目录。',
+                       ident, ['aweme_id']),
+            self._tool('douyin_download_aweme_images', '上游原版：下载指定抖音图文作品中的图片。',
+                       ident, ['aweme_id']),
+            self._tool('douyin_ocr_aweme_images', '上游原版：下载并 OCR 指定抖音图文作品。',
+                       ident, ['aweme_id']),
+            self._tool('douyin_transcribe_video', '上游原版：使用当前 ASR 配置转写指定抖音视频。',
+                       ident, ['aweme_id']),
+            self._tool('douyin_batch_transcribe', '上游原版：搜索并批量转写指定主题的视频。',
+                       {'keyword': {'type': 'string'}, 'count': {'type': 'integer', 'minimum': 1, 'maximum': 5},
+                        'sort_type': {'type': 'integer', 'enum': [0, 1, 2]}}, ['keyword']),
+        ])
+        return tools
 
     async def execute(self, name, arguments, context):
         if not self.enabled():
@@ -362,6 +506,48 @@ class DouyinService:
                          'check_login_status_request' if 'check_login_status_request' in code else
                          'process_startup')
                 return {'runtime': 'unavailable', 'phase': phase, 'error': code}
+        if name == 'douyin_get_login_qrcode':
+            route = self._route(context)
+            if not route or not self.sender:
+                raise PermissionError('douyin_qrcode_requires_owner_private_qq')
+            qr = await self.client.start_qr_login()
+            from cognitive_core.contracts import Action
+            action = Action.create('send_message', {
+                'session_id': scope, 'text': '用抖音 App 扫描这张二维码并在手机上确认登录。二维码约两分钟有效。',
+                'image_base64': qr['image_base64'], 'platform': 'napcat'},
+                channel='qq', target=route['target'], reason='用户请求抖音扫码登录')
+            delivered = await self.sender(route['event_id'], action.to_dict())
+            if not delivered.success:
+                raise RuntimeError('douyin_qrcode_delivery_failed')
+            return {'status': 'waiting_for_scan', 'delivered': True, 'expires_in_seconds': 120,
+                    'next_step': '在 QQ 收到的二维码上使用抖音 App 扫码并确认'}
+        if name == 'douyin_login_status':
+            state = dict(self.client.qr_state)
+            if self.client.qr_process and self.client.qr_process.returncode is None:
+                return state
+            return state
+        if name.startswith('douyin_') and name[7:] in UPSTREAM_TOOLS:
+            upstream = name[7:]
+            arguments = dict(arguments or {})
+            if upstream == 'search_videos':
+                if not 2 <= len(str(arguments.get('keyword') or '').strip()) <= 80:
+                    raise ValueError('query_length_must_be_2_to_80')
+                if _contains_secret_marker(arguments['keyword']):
+                    raise ValueError('query_contains_private_credential_markers')
+                arguments['count'] = max(1, min(20, int(arguments.get('count', 10))))
+                arguments['offset'] = max(0, int(arguments.get('offset', 0)))
+            elif upstream in {'download_video', 'download_aweme_images', 'ocr_aweme_images'}:
+                arguments.pop('save_dir', None)
+            elif upstream in {'get_video_comments', 'get_sub_comments'}:
+                arguments['count'] = max(1, min(50, int(arguments.get('count', 20))))
+                arguments['cursor'] = max(0, int(arguments.get('cursor', 0)))
+            elif upstream == 'get_user_posts':
+                arguments['count'] = max(1, min(30, int(arguments.get('count', 18))))
+            elif upstream == 'get_homefeed':
+                arguments['count'] = max(1, min(20, int(arguments.get('count', 20))))
+            elif upstream == 'batch_transcribe':
+                arguments['count'] = max(1, min(5, int(arguments.get('count', 3))))
+            return await self.client.call(upstream, arguments)
         if name in {'douyin_search', 'douyin_learn_topic'}:
             query = str(arguments.get('query') or '').strip()
             if not 2 <= len(query) <= 80:
@@ -503,3 +689,4 @@ class DouyinService:
 
     async def close(self):
         await self.client.close()
+        await self.client.stop_qr_login()
