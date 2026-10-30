@@ -58,7 +58,15 @@ class ActionDispatcher:
                     if claimed["status"]=="succeeded":return ActionResult(aid,"succeeded",True,attempts=claimed["attempts"])
                     try:
                         executor_action = dict(action); executor_action["_approval_validated"] = approval_validated
-                        result=await asyncio.wait_for(executor(executor_action),timeout=self.timeout)
+                        action_timeout = self.timeout
+                        payload = action.get("payload", {})
+                        if (action.get("type") == "call_mcp" and isinstance(payload, dict)
+                                and payload.get("tool") == "qq_send_tts_audio"):
+                            # Audio generation / Bilibili clip extraction can take longer
+                            # than ordinary chat actions. Keep this exception scoped to
+                            # the explicit audio tool instead of slowing every action.
+                            action_timeout = max(action_timeout, 240.0)
+                        result=await asyncio.wait_for(executor(executor_action),timeout=action_timeout)
                         if isinstance(result,dict) and result.get("status") in {"accepted","queued","started"}:
                             self._device_confirmations.setdefault(aid, asyncio.Event())
                             self.outbox.transition(aid,"retrying","awaiting external completion",retry_at=time.time()+self.timeout)

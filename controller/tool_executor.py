@@ -39,7 +39,8 @@ class ToolExecutor:
             if hasattr(provider,"execute"): value=provider.execute(tool_name,arguments,context)
             elif hasattr(provider,"execute_tool"): value=provider.execute_tool(tool_name,arguments)
             else: return {"tool":tool_name,"success":False,"error":"provider has no executor","provider":item.get("provider","")}
-            if hasattr(value,"__await__"): value=await asyncio.wait_for(value,timeout=self.timeout)
+            timeout = max(self.timeout, 240.0) if tool_name == "qq_send_tts_audio" else self.timeout
+            if hasattr(value,"__await__"): value=await asyncio.wait_for(value,timeout=timeout)
             # Existing plugin/server adapters return ActionResponse objects.
             action = getattr(value, "action", None)
             if action is not None and getattr(action, "name", "") in {"ERROR", "NOTFOUND"}:

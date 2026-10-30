@@ -411,6 +411,24 @@ class EventRouter:
                 reply_result=await self.dispatcher.dispatch(event.event_id,reply_action.to_dict())
                 logger.info(f"dsh preparation response handled event_id={event.event_id} status={prepared.get('status','failed')} delivered={reply_result.success}")
                 dispatched.append(reply_result.to_dict())
+            audio_tool = action.get('type') == 'call_mcp' and payload.get('tool') == 'qq_send_tts_audio'
+            if audio_tool and not action_result.success:
+                # The normal chat bubble may already have been sent before this
+                # longer-running media action completes. Correct any implied
+                # success with a deterministic status message based on the real
+                # delivery result.
+                correction = Action.create('send_message', {
+                    'session_id': event.session_id,
+                    'text': '刚才那段语音没有成功发出；这次没有播放。',
+                    'platform': event.metadata.get('platform', 'napcat'),
+                    'source_message_id': event.metadata.get('source_message_id', event.source_event_id),
+                }, channel=str(event.metadata.get('reply_channel') or 'qq'),
+                   target=str(event.metadata.get('reply_target') or event.actor_id),
+                   reason='如实报告语音生成或投递失败')
+                correction_result = await self.dispatcher.dispatch(event.event_id, correction.to_dict())
+                actions.append(correction.to_dict())
+                dispatched.append(correction_result.to_dict())
+                logger.info(f"QQ audio failure reported event_id={event.event_id} delivered={correction_result.success}")
             result_event = self.build(
                 "controller",
                 "action_result",

@@ -120,7 +120,13 @@ class QQGateway:
                 if success:
                     self.logger.bind(tag=TAG).info("NapCat message delivered through reverse WebSocket")
                     return True
-                self.logger.bind(tag=TAG).error("NapCat reverse WebSocket rejected message")
+                if isinstance(response, dict):
+                    detail = response.get("wording") or response.get("message") or "unknown rejection"
+                    self.logger.bind(tag=TAG).error(
+                        f"NapCat reverse WebSocket rejected message retcode={retcode} detail={str(detail)[:240]}"
+                    )
+                else:
+                    self.logger.bind(tag=TAG).error("NapCat reverse WebSocket rejected message: invalid response")
             except Exception as exc:
                 self.logger.bind(tag=TAG).error(f"NapCat reverse WebSocket send failed: {exc}")
         elif self.delivery_mode != "http":

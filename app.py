@@ -122,16 +122,23 @@ async def main():
                 suffix=audio.suffix.lower()
                 if suffix not in {'.wav','.mp3'}:
                     raise ValueError('Unsupported QQ audio format')
-                segments=[]
-                if message.strip():
-                    segments.append({'type':'text','data':{'text':message.strip()}})
-                segments.append({'type':'record','data':{'file':'base64://'+base64.b64encode(audio.read_bytes()).decode('ascii')}})
-                message=segments
-            sent = await qq_gateway.send_private_message(user_id, message)
-            if not sent:
-                raise RuntimeError("NapCat message delivery failed")
-            if payload.get('audio_artifact'):
-                audio.unlink(missing_ok=True)
+                message=[{'type':'record','data':{'file':'base64://'+base64.b64encode(audio.read_bytes()).decode('ascii')}}]
+                try:
+                    sent = await qq_gateway.send_private_message(user_id, message)
+                    if not sent:
+                        raise RuntimeError("NapCat rejected QQ voice message")
+                    # Keep voice as a standalone PTT element; some NapCat/QQ
+                    # builds reject mixed text + record chains.
+                    if str(payload.get('text') or '').strip():
+                        caption_sent = await qq_gateway.send_private_message(user_id, str(payload['text']).strip())
+                        if not caption_sent:
+                            logger.warning("QQ audio caption was not delivered; voice message was delivered")
+                finally:
+                    audio.unlink(missing_ok=True)
+            else:
+                sent = await qq_gateway.send_private_message(user_id, message)
+                if not sent:
+                    raise RuntimeError("NapCat message delivery failed")
             return {"status": "completed", "output_sent": True, "channel": "napcat"}
     qq_official_gateway = QQOfficialGateway(config, qq_gateway.agent, logger)
     if ws_server.action_dispatcher is not None:
