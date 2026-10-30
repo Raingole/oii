@@ -236,6 +236,36 @@ def prepare_dependencies(*, skip_python=False):
     use_tencent = start_tencent(config)
     use_bilibili = bool((config.get('learning',{}) or {}).get('enabled',False))
     node = node_check(config) if mmtr or use_tencent or use_bilibili else None
+    douyin = config.get('douyin',{}) or {}
+    if bool(douyin.get('enabled',False)):
+        source = ROOT / 'deploy/douyin/upstream'
+        venv = ROOT / 'deploy/douyin/.venv'
+        interpreter = venv / 'bin/python'
+        wanted = fingerprint([source / 'pyproject.toml', source / 'uv.lock', ROOT / 'deploy/douyin/UPSTREAM_REVISION.txt'], 'douyin-mcp')
+        if stamp.get('douyin-mcp') != wanted or not interpreter.is_file():
+            try:
+                if not interpreter.is_file():
+                    info('Creating isolated Douyin Python runtime')
+                    run([python, '-m', 'venv', venv])
+                info('Preparing isolated Douyin read-only learning integration')
+                uv = shutil.which('uv')
+                if uv:
+                    install_env = {**os.environ, 'UV_PROJECT_ENVIRONMENT': str(venv)}
+                    result = run([uv, 'sync', '--locked', '--no-dev'], cwd=source, env=install_env,
+                                 capture=True, check=False)
+                else:
+                    result = run([interpreter, '-m', 'pip', 'install', '--disable-pip-version-check',
+                                  '--no-warn-script-location', '-e', source], cwd=source,
+                                 capture=True, check=False)
+                if result.returncode == 0:
+                    stamp['douyin-mcp'] = wanted
+                    write_json(stamp_path, stamp)
+                    changed = True
+                else:
+                    # Douyin is optional: a mirror/proxy outage must not prevent OII boot.
+                    info(f'Douyin runtime install failed (pip exit {result.returncode}); OII will continue without it')
+            except Exception as exc:
+                info(f'Douyin runtime preparation failed ({type(exc).__name__}); OII will continue without it')
     if use_bilibili:
         folder = ROOT / 'deploy/bilibili'
         wanted = fingerprint([folder / 'package.json',folder / 'package-lock.json'],'bilibili-mcp')

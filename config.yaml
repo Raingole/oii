@@ -170,6 +170,17 @@ learning:
     comments_timeout_seconds: 60
     fallback_to_asr: false
 
+# Douyin read-only discovery and source-backed learning.
+# The MCP runtime is installed in deploy/douyin/.venv; cookies and downloaded
+# temporary media remain under data/ and tmp/, never in the repository.
+douyin:
+  enabled: true
+    timeout_seconds: 1800
+  max_video_seconds: 1800
+  cookie_path: data/douyin/cookies.txt
+  download_dir: tmp/douyin/downloads
+  transcript_dir: tmp/douyin/transcripts
+
 # DSH tasks are proposed and executed only after one-time approval in the
 # owner's private QQ chat. The headless CLI, when installed, runs as this
 # service process user and cannot outlive its approved task.

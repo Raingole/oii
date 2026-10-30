@@ -24,6 +24,9 @@ data/memory/
 data/cognitive/
 data/knowledge/
 deploy/bilibili/node_modules/
+deploy/douyin/.venv/
+data/douyin/
+tmp/douyin/
 
 data/video/
 
@@ -34,6 +37,7 @@ data/video/
 .env.bak*
 =
 *.lock
+!deploy/douyin/upstream/uv.lock
 data/state.json
 data/state.json.lock
 data/simulated_qq_users.json

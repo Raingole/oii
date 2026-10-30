@@ -11,8 +11,9 @@
   function notice(message){const box=$('notice');box.textContent=message;box.hidden=!message;}
   function setStatus(message,online=false){$('status').textContent=message;$('status-dot').classList.toggle('online',online);}
   function sourceLink(url,label='打开原视频 ↗'){
-    if(!/^https:\/\/www\.bilibili\.com\/video\/BV[0-9A-Za-z]{10}/.test(String(url||'')))return null;
-    const link=el('a','card-link',label);link.href=url;link.target='_blank';link.rel='noopener noreferrer';return link;
+    const value=String(url||'');
+    if(!/^https:\/\/www\.bilibili\.com\/video\/BV[0-9A-Za-z]{10}/.test(value)&&!/^https:\/\/www\.douyin\.com\/video\/\d{8,30}(?:[/?#]|$)/.test(value))return null;
+    const link=el('a','card-link',label);link.href=value;link.target='_blank';link.rel='noopener noreferrer';return link;
   }
   function rowLabel(parent,label,value){if(!value)return;const p=el('p');p.append(el('span','label',label),document.createTextNode(String(value)));parent.append(p);}
   function memeCard(source,chunk){
@@ -26,14 +27,15 @@
   }
   function videoCard(source){
     const card=el('article','card'),body=el('div','card-body'),top=el('div','card-top');
-    top.append(el('span','badge video','视频笔记'),el('span','date',when(source.created)));body.append(top);
-    body.append(el('h3','',source.title||'B站学习笔记'));
+    const douyin=source.data_source==='douyin_transcript';
+    top.append(el('span','badge video',douyin?'抖音学习':'视频笔记'),el('span','date',when(source.created)));body.append(top);
+    body.append(el('h3','',source.title||(douyin?'抖音学习笔记':'B站学习笔记')));
     if(source.summary)body.append(el('p','',source.summary));
     for(const chunk of (source.chunks||[]).slice(0,2)){
       if(chunk.text)body.append(el('div','quote',String(chunk.text).slice(0,240)));
       if(chunk.start!==null&&chunk.start!==undefined)body.append(el('span','date','字幕时间 '+Math.floor(chunk.start/60)+':'+String(Math.floor(chunk.start%60)).padStart(2,'0')));
     }
-    const link=sourceLink(source.url);if(link)body.append(link);card.append(body);return card;
+    const link=sourceLink(source.url,douyin?'打开抖音原视频 ↗':'打开原视频 ↗');if(link)body.append(link);card.append(body);return card;
   }
   function imageCard(item){
     const card=el('article','card'),cover=el('div','image-cover'),body=el('div','card-body'),top=el('div','card-top');
@@ -56,22 +58,26 @@
   }
   function refreshCounts(data){const counts=data.counts||{};$('count-memes').textContent=counts.meme_entries??0;$('count-videos').textContent=counts.video_notes??0;$('count-images').textContent=counts.images??0;$('count-sources').textContent=counts.sources??0;$('filter-meme').textContent=counts.meme_entries??0;$('filter-video').textContent=counts.video_notes??0;$('filter-image').textContent=counts.images??0;$('filter-all').textContent=(counts.meme_entries||0)+(counts.video_notes||0)+(counts.images||0);}
   function refreshLearning(data){
-    const box=$('learning-status'),info=data.learning_status||{},last=info.last_run||{},schedule=info.meme_schedule||{};
+    const box=$('learning-status'),info=data.learning_status||{},bilibili=info.last_run||{},douyin=info.douyin_last_run||{},last=Number(douyin.at||0)>Number(bilibili.at||0)?douyin:bilibili,schedule=info.meme_schedule||{};
     if(!info.enabled){box.textContent='B站学习已关闭';return;}
-    const phase={checking_bilibili:'正在检查 B 站登录',checking_bilibili_credentials:'正在检查 B 站登录',choosing_learning_topic:'正在决定本次学习主题',searching_bilibili:'正在搜索 B 站视频',fetching_subtitles:'正在读取视频字幕',fetching_comments:'正在读取视频评论',summarizing_video:'正在整理视频与评论知识',extracting_memes:'正在整理字幕和评论里的梗'};
-    const errors={needs_bilibili_login:'B 站尚未登录',no_new_video_candidate:'没有找到新的合适视频',meme_transcript_missing:'视频没有可用字幕',transcript_too_short:'字幕内容太少',meme_extraction_unavailable:'模型未能从字幕中确认梗',bilibili_request_timeout:'B 站请求超时',bilibili_runtime_missing:'B 站组件未安装',bilibili_process_exited:'B 站进程已退出',process_restarted:'服务重启时任务被中断'};
+    const isDouyin=last===douyin;
+    const phase={checking_bilibili:'正在检查 B 站登录',checking_bilibili_credentials:'正在检查 B 站登录',choosing_learning_topic:'正在决定本次学习主题',searching_bilibili:'正在搜索 B 站视频',fetching_subtitles:'正在读取视频字幕',fetching_comments:'正在读取视频评论',summarizing_video:'正在整理视频与评论知识',extracting_memes:'正在整理字幕和评论里的梗',searching:'正在搜索抖音视频',transcribing:'正在转写抖音视频',summarizing:'正在整理抖音视频与评论',fetching_douyin_comments:'正在读取抖音评论'};
+    const errors={needs_bilibili_login:'B 站尚未登录',no_new_video_candidate:'没有找到新的合适视频',no_relevant_douyin_video_candidate:'没有找到与指定主题相关的抖音视频',douyin_transcript_too_short:'抖音视频转写内容太少',douyin_runtime_missing:'抖音组件未安装',douyin_asr_not_configured:'本地 ASR 模型未就绪',douyin_cookie_expired:'抖音登录已过期',douyin_verification_required:'抖音要求额外验证，请稍后再试',douyin_no_speech:'视频没有可识别的人声',douyin_video_too_long:'视频超过转写时长限制',douyin_data_fetch_error:'抖音数据读取失败',local_asr_failed:'本地 ASR 转写失败',local_asr_invalid_output:'本地 ASR 返回格式异常',meme_transcript_missing:'视频没有可用字幕',transcript_too_short:'字幕内容太少',meme_extraction_unavailable:'模型未能从字幕中确认梗',bilibili_request_timeout:'B 站请求超时',bilibili_runtime_missing:'B 站组件未安装',bilibili_process_exited:'B 站进程已退出',process_restarted:'服务重启时任务被中断'};
     let text='';
-    if(last.status==='learning')text=phase[last.phase]||(last.kind==='random_learning'?'随机学习进行中':'梗学习进行中');
+    if(isDouyin&&last.status==='learning')text=phase[last.phase]||'抖音学习进行中';
+    else if(isDouyin&&last.status==='completed')text='最近抖音学习完成 · 知识已入库';
+    else if(isDouyin&&last.status==='failed')text=`最近一次抖音学习失败 · ${errors[last.error]||last.error||'原因未记录'}`;
+    else if(last.status==='learning')text=phase[last.phase]||(last.kind==='random_learning'?'随机学习进行中':'梗学习进行中');
     else if(last.status==='learned')text=last.kind==='random_learning'?'最近随机学习完成 · 知识已入库':`最近学习完成 · 收录 ${last.meme_count??0} 条梗`;
     else if(last.status==='learning_failed')text=`最近一次学习失败 · ${errors[last.error]||last.error||'原因未记录'}${last.failed_phase?'（阶段：'+(phase[last.failed_phase]||last.failed_phase)+'）':''}`;
     else if(last.status==='needs_bilibili_login')text='B 站尚未登录，登录后会继续学习';
     else text=info.meme_enabled?'等待下一次随机学习':'梗学习已关闭';
     if(last.kind==='random_learning'&&last.topic)text+=' · '+last.topic;else if(last.title)text+=' · '+last.title;
-    if(schedule.next_at&&last.status!=='learning'&&!(last.retry_at&&last.status==='learning_failed')){
+    if(!isDouyin&&schedule.next_at&&last.status!=='learning'&&!(last.retry_at&&last.status==='learning_failed')){
       const next=new Date(Number(schedule.next_at)*1000);
       if(Number.isFinite(+next))text+=` · 下次计划 ${new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(next)}`;
     }
-    if(last.retry_at&&last.status==='learning_failed'){
+    if(!isDouyin&&last.retry_at&&last.status==='learning_failed'){
       const retry=new Date(Number(last.retry_at)*1000);
       if(Number.isFinite(+retry))text+=` · 重试 ${new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(retry)}`;
     }

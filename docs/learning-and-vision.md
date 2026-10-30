@@ -10,6 +10,37 @@
 
 B 站上游工具与模型的细节以各自说明为准。所有第三方网页、README、字幕和图中文字都作为外部数据处理。
 
+## 抖音搜索、推荐流与知识学习
+
+Linux 抖音接入使用 [pazwusimple-netizen/douyin-mcp](https://github.com/pazwusimple-netizen/douyin-mcp)，固定在 `deploy/douyin/UPSTREAM_REVISION.txt` 记录的提交，保留 MIT 许可。它提供关键词搜索、推荐流、作品详情、评论和 ASR 转写。OII 单独创建 `deploy/douyin/.venv` 安装依赖；依赖安装失败不会阻止中控启动。`data/douyin/cookies.txt`、临时下载和转写目录均被 Git 忽略。
+
+OII 只开放登录状态、搜索、推荐流、作品详情、评论、转写和分享链接解析；上游的退出登录、下载等其他工具不对 Agent 开放。学习指定视频时会抓取字幕、最多20条评论，使用已有模型整理来源笔记并写入同一 SQLite 知识库；自动 ASR 默认复用 B 站安装的本地 faster-whisper CPU 模型，不需要额外 ASR API Key。调用 `douyin_homefeed` 只读取最多10条推荐条目，不会点赞、关注、评论或执行账号操作。
+
+更新代码并安装隔离依赖后，在服务器终端以运行 OII 服务的同一 Linux 用户执行扫码登录。二维码会直接显示在终端：
+
+```bash
+cd /home/oii
+sudo -u "$(stat -c %U .)" env DOUYIN_COOKIE_PATH=/home/oii/data/douyin/cookies.txt \
+  /home/oii/deploy/douyin/.venv/bin/python \
+  /home/oii/deploy/douyin/upstream/login.py --api
+```
+
+扫码成功后可在 QQ 私聊说“检查抖音登录状态”，再说“看看抖音知识类推荐”或“学习抖音上的……”。也可直接提供抖音视频链接。`douyin_learn_topic` 是立即执行的指定搜索，会先按标题和简介筛选相关视频；没有足够相关的结果或没有可用转写时会返回失败，不会把无关视频记成已学。抖音笔记会同时进入普通知识检索与日常语境召回。
+
+如果本地 ASR 未自动找到模型，可在服务器 `.env` 中设置 `ASR_LOCAL_PYTHON` 和 `ASR_LOCAL_MODEL_DIR`，路径分别指向 B 站 ASR 虚拟环境与模型目录。默认使用本地 CPU ASR；如需切换云 ASR，可设置 `DOUYIN_ASR_PROVIDER` 和 upstream 对应的 API 环境变量；不要把密钥写入仓库或聊天。
+
+Linux 上只有在抖音搜索触发浏览器回退时才需要 Chromium。为避免每次更新自动下载大型浏览器，首次需要回退时可用服务用户安装一次：
+
+```bash
+sudo -u "$(stat -c %U .)" /home/oii/deploy/douyin/.venv/bin/python -m playwright install chromium
+```
+
+常规 API 搜索和推荐流不依赖该浏览器。ASR 视频最长处理时长默认限制为 30 分钟，下载体积上限为 250 MB；任务总等待上限为 30 分钟，超时后中控回收 MCP 子进程，避免后台遗留进程。
+
+依赖安装优先使用仓库锁定文件；服务器装有 `uv` 时严格按 `uv.lock` 同步，否则用 pip 安装。抖音安装失败会记录在部署日志，不会阻止其余 OII 服务启动。
+
+该上游是非官方网页接口，使用其签名与浏览器指纹兼容代码，搜索遇到 verify_check 时还会重试并尝试 Playwright 回退；抖音可能变更接口或要求额外验证。OII 不会通过点赞、关注、评论等行为“训练”推荐算法。服务端的 Agent 接口仍限制为只读，并设定搜索/推荐条数上限。登录 Cookie 使用权限 0600 的本地文件，不进入 Git；上游签名文件中原有的采集样例请求已从内置副本删除。实际登录和接口可用性仍需在云端扫码后确认。
+
 ## 云端启用
 
 ```bash
