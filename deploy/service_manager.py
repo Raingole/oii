@@ -571,6 +571,38 @@ def systemctl(action, unit, *, capture=False):
     return run(command, capture=capture)
 
 
+def install_door_audio(skip_deps=False):
+    env_file = Path("/etc/door-audio/door-audio.env")
+    if not env_file.is_file():
+        info(f"Door audio setup pending: configure {env_file} and rerun auto-start.sh install")
+        return
+
+    executable("ffmpeg")
+    source = ROOT / "deploy" / "door-audio"
+    target = Path("/opt/door-audio")
+    install = executable("install")
+    run([install, "-d", "-m", "0755", target / "templates"])
+    run([install, "-m", "0644", source / "app.py", source / "requirements.txt", target])
+    run([install, "-m", "0644", source / "templates/admin.html", target / "templates"])
+    waitress = target / ".venv/bin/waitress-serve"
+    if not skip_deps:
+        if not (target / ".venv/bin/python").is_file():
+            run([executable("python3"), "-m", "venv", target / ".venv"])
+        run([target / ".venv/bin/python", "-m", "pip", "install", "-r", target / "requirements.txt"])
+    executable(waitress)
+
+    if run([executable("getent"), "passwd", "door-audio"], capture=True, check=False).returncode:
+        run([executable("useradd"), "--system", "--user-group", "--no-create-home",
+             "--shell", "/usr/sbin/nologin", "door-audio"])
+    unit = UNIT_DIR / "door-audio.service"
+    run([install, "-m", "0644", source / unit.name, unit])
+    run([executable("systemd-analyze"), "verify", unit], capture=True)
+    run([executable("systemctl"), "daemon-reload"])
+    run([executable("systemctl"), "enable", unit.name])
+    systemctl("restart", unit.name)
+    systemctl("is-active", unit.name, capture=True)
+
+
 def install_runtime(skip_deps=False):
     linux_root()
     result = delegated(["start", "prepare", *( ["--no-deps"] if skip_deps else [])])
@@ -586,6 +618,7 @@ def install_runtime(skip_deps=False):
     systemctl("restart", service_name())
     systemctl("is-active", service_name(), capture=True)
     info(f"Enabled on boot with automatic crash recovery: {service_name()}")
+    install_door_audio(skip_deps)
 
 
 def install_update():

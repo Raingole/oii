@@ -4,7 +4,19 @@
 
 ## 在 Ubuntu 上部署
 
-在仓库根目录执行以下命令。首次部署创建专用系统用户。
+如果这台服务器也运行 OII，在仓库根目录执行以下命令，随后按下文配置 Nginx。
+
+```bash
+sudo apt-get install python3-venv ffmpeg nginx
+sudo install -d -m 0750 /etc/door-audio
+sudo test -e /etc/door-audio/door-audio.env || sudo install -m 0600 deploy/door-audio/door-audio.env.example /etc/door-audio/door-audio.env
+sudoedit /etc/door-audio/door-audio.env
+sudo bash auto-start.sh install
+```
+
+填写下文所列的环境变量后，安装入口会安装并启动 `door-audio.service`，并设置开机自启。已有环境文件和音频数据可继续使用。更新关门音频代码后重新运行该安装入口。
+
+如果只部署关门音频，在仓库根目录执行以下命令。首次部署创建专用系统用户。
 
 ```bash
 sudo apt-get install python3-venv ffmpeg nginx
