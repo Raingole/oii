@@ -1,25 +1,35 @@
 <!doctype html>
 <html lang="zh-CN">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>关门提示音</title>
 <style>
+  :root { color-scheme: light; --ink: #17202c; --muted: #536274; --line: #e2e8ee; --blue: #1659b7; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: #16332b; background: #f1f6f3; font: 16px/1.55 "Inter", system-ui, sans-serif; }
-  main { width: min(100% - 32px, 720px); margin: 7vh auto; }
-  h1 { margin-bottom: 24px; }
+  body { margin: 0; color: var(--ink); background: #eef3f8; font: 16px/1.55 "DM Sans", system-ui, sans-serif; }
+  header { background: white; border-bottom: 1px solid var(--line); padding: 18px max(16px, calc((100% - 760px) / 2)); font-weight: 700; }
+  main { width: min(calc(100% - 32px), 760px); margin: 28px auto; }
+  h1 { font-size: clamp(1.65rem, 5vw, 2.15rem); margin: 0; }
   h2 { font-size: 1.15rem; margin: 0 0 12px; }
-  section { background: #fff; padding: 22px; border: 1px solid #d6e4dc; border-radius: 12px; margin-bottom: 16px; }
-  p { margin: 8px 0; }
-  small { color: #466358; }
-  button { background: #205f49; color: white; border: 0; border-radius: 6px; padding: 8px 15px; cursor: pointer; font: inherit; }
-  input[type=file] { width: 100%; margin: 12px 0; }
-  label.track { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; border-bottom: 1px solid #e3ebe7; overflow-wrap: anywhere; }
+  section { background: #fff; padding: clamp(16px, 4vw, 26px); border: 1px solid var(--line); border-radius: 20px; margin-top: 16px; box-shadow: 0 8px 30px rgba(36,57,80,.04); }
+  p { margin: 8px 0; overflow-wrap: anywhere; }
+  small, .description { color: var(--muted); }
+  button { background: var(--blue); color: white; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer; font: inherit; }
+  button:hover { background: #124b98; }
+  input[type=file] { display: block; max-width: 100%; margin: 12px 0; font: inherit; }
+  input[type=radio] { accent-color: var(--blue); }
+  label.track { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
   .actions { margin-top: 14px; }
+  .current { padding: 10px 12px; border-radius: 9px; background: #eaf2ff; }
   .error { color: #9d281e; }
 </style>
+</head>
+<body>
+<header>OII 中控助手</header>
 <main>
   <h1>关门提示音</h1>
+  <p class="description">上传音频并保存播放选择。ESP32-C3 关门时会向服务器获取所选音频。</p>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <section>
     <h2>上传音频</h2>
@@ -32,6 +42,8 @@
   </section>
   <section>
     <h2>关门时播放</h2>
+    <p class="current">当前设置：<strong>{{ selected_name if selected_name is not none else "不播放" }}</strong></p>
+    {% if not tracks %}<p class="description">还没有音频，请先上传文件。</p>{% endif %}
     <form method="post" action="{{ url_for('select') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label class="track"><input type="radio" name="audio_id" value="" {% if not selected %}checked{% endif %}> 不播放</label>
@@ -45,3 +57,5 @@
     </form>
   </section>
 </main>
+</body>
+</html>

@@ -73,6 +73,7 @@ def create_app():
             tracks = db.execute("SELECT id, name, size FROM audio ORDER BY rowid DESC").fetchall()
             selected = db.execute("SELECT selected FROM settings WHERE id = 1").fetchone()[0]
         return render_template("admin.html", tracks=tracks, selected=selected,
+                               selected_name=next((track["name"] for track in tracks if track["id"] == selected), None),
                                csrf=csrf_token, error=error), status
 
     @app.errorhandler(413)
