@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关门提示音</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #16332b; background: #f1f6f3; font: 16px/1.55 "Inter", system-ui, sans-serif; }
+  main { width: min(100% - 32px, 720px); margin: 7vh auto; }
+  h1 { margin-bottom: 24px; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; }
+  section { background: #fff; padding: 22px; border: 1px solid #d6e4dc; border-radius: 12px; margin-bottom: 16px; }
+  p { margin: 8px 0; }
+  small { color: #466358; }
+  button { background: #205f49; color: white; border: 0; border-radius: 6px; padding: 8px 15px; cursor: pointer; font: inherit; }
+  input[type=file] { width: 100%; margin: 12px 0; }
+  label.track { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; border-bottom: 1px solid #e3ebe7; overflow-wrap: anywhere; }
+  .actions { margin-top: 14px; }
+  .error { color: #9d281e; }
+</style>
+<main>
+  <h1>关门提示音</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <section>
+    <h2>上传音频</h2>
+    <small>支持 WAV、MP3、M4A、FLAC 或 OGG。每段最多 30 秒、16 MiB。</small>
+    <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="file" name="audio" aria-label="选择音频文件" accept=".wav,.mp3,.m4a,.flac,.ogg" required>
+      <button type="submit">上传并转换</button>
+    </form>
+  </section>
+  <section>
+    <h2>关门时播放</h2>
+    <form method="post" action="{{ url_for('select') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="track"><input type="radio" name="audio_id" value="" {% if not selected %}checked{% endif %}> 不播放</label>
+      {% for track in tracks %}
+      <label class="track">
+        <input type="radio" name="audio_id" value="{{ track.id }}" {% if selected == track.id %}checked{% endif %}>
+        <span>{{ track.name }} <small>{{ "%.2f"|format(track.size / 64000) }} 秒</small></span>
+      </label>
+      {% endfor %}
+      <div class="actions"><button type="submit">保存选择</button></div>
+    </form>
+  </section>
+</main>

@@ -1,0 +1,21 @@
+[Unit]
+Description=ESP32-C3 door audio
+After=network.target
+
+[Service]
+User=door-audio
+Group=door-audio
+WorkingDirectory=/opt/door-audio
+EnvironmentFile=/etc/door-audio/door-audio.env
+StateDirectory=door-audio
+Environment=DOOR_AUDIO_DATA=/var/lib/door-audio
+ExecStart=/opt/door-audio/.venv/bin/waitress-serve --listen=127.0.0.1:18022 --threads=8 --max-request-body-size=16842752 --outbuf-high-watermark=65536 --call app:create_app
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
